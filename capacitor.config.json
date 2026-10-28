@@ -1,0 +1,10 @@
+{
+  "appId": "com.witlin",
+  "appName": "witlin",
+  "webDir": "www",
+  "server": {
+    "url": "https://soul0516.duckdns.org:46893",
+    "cleartext": false,
+    "allowNavigation": ["soul0516.duckdns.org"]
+  }
+}

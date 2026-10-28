@@ -1,0 +1,14 @@
+{
+  "name": "witlin-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo '使用远程URL，无需构建本地web'"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/ios": "^6.2.0",
+    "@capacitor/android": "^6.2.0"
+  }
+}
