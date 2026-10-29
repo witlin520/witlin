@@ -915,7 +915,7 @@ async function doGen(){
       const r=await apiFetch(API+'/api/image',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt})});
       const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'生图失败');
       lastImageUrl=j.image_url;
-      fillMsg(lm.m, lm.el, {display:'已生成', media:[{type:'image',url:j.image_url}], extraHtml:editBtnHtml(j.image_url)});
+      fillMsg(lm.m, lm.el, {display:'已生成', media:[{type:'image',url:j.image_url}]});
     }else{
       const body={prompt,duration:durSec,steps:videoSteps};
       if(genRefs.length) body.images=[...genRefs];
@@ -940,10 +940,6 @@ async function doGen(){
 }
 
 // ---------- 改图 (基于最近一张图) ----------
-function editBtnHtml(url){
-  const u=String(url).replace(/'/g,"\\'");
-  return '<div class="editrow"><button class="edit-btn" onclick="editPrompt(\''+u+'\')">🖊 改图</button></div>';
-}
 function editPrompt(url){
   const p=prompt('要改动哪里？例如：把猫换成狗 / 背景换成海滩');
   if(!p||!p.trim())return;
@@ -955,7 +951,7 @@ async function editImage(imgUrl,p){
     const r=await apiFetch(API+'/api/edit',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt:p,image_url:imgUrl})});
     const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'改图失败');
     lastImageUrl=j.image_url;
-    fillMsg(lm.m, lm.el, {display:'已修改', media:[{type:'image',url:j.image_url}], extraHtml:editBtnHtml(j.image_url)});
+    fillMsg(lm.m, lm.el, {display:'已修改', media:[{type:'image',url:j.image_url}]});
   }catch(e){ failMsg(lm, e.message); }
   scrollBottom();
 }
@@ -1020,7 +1016,7 @@ async function eraseImage(imgUrl,obj,maskB64){
     const r=await apiFetch(API+'/api/edit',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt:'去掉'+obj,image_url:imgUrl,mask_base64:maskB64,use_lora:'remove',edit_strength:1.0})});
     const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'擦除失败');
     lastImageUrl=j.image_url;
-    fillMsg(lm.m, lm.el, {display:'已擦除', media:[{type:'image',url:j.image_url}], extraHtml:editBtnHtml(j.image_url)});
+    fillMsg(lm.m, lm.el, {display:'已擦除', media:[{type:'image',url:j.image_url}]});
   }catch(e){ failMsg(lm, e.message); }
   scrollBottom();
 }
