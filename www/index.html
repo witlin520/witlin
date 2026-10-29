@@ -102,6 +102,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .medac{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .medbtn{font-size:12px;padding:5px 11px;border:1px solid var(--line);border-radius:12px;background:#f5f5f7;color:#333;cursor:pointer;text-decoration:none;display:inline-block;line-height:1.3}
 .medbtn.delb{color:#e33}
+.medbtn.editb{background:var(--accent);color:#fff;border-color:var(--accent)}
 /* 顶部左侧 会话区 */
 .topbar .left{display:flex;align-items:center;gap:2px}
 #newBtn{display:none;align-items:center;padding:6px;color:var(--accent)}
@@ -450,7 +451,7 @@ function mSrc(u){ return (u&&String(u).startsWith('data:'))?u:(API+'/api/media?u
 function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url); }   // 走 https 代理, 规避私网IP/ATS
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
-  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; const q=(m.type!=='video'?'<button class="medbtn quoteb" type="button" data-url="'+esc(m.url)+'">🔗 引用</button>':''); return q+'<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
+  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; const ed=(m.type!=='video'?'<button class="medbtn editb" type="button" data-url="'+esc(m.url)+'" onclick="editPrompt(this.dataset.url)">🖊 改图</button>':''); const q=(m.type!=='video'?'<button class="medbtn quoteb" type="button" data-url="'+esc(m.url)+'">🔗 引用</button>':''); return q+ed+'<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
   return '<div class="medac">'+saves+'<button class="medbtn delb" onclick="delMsg(this)">🗑 删除</button></div>';
 }
 function delMsg(btn){
