@@ -240,6 +240,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .v-zoom.on{display:flex}
 .v-zoom button{width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:18px;cursor:pointer}
 .media img{cursor:zoom-in}
+/* 涂抹擦除 overlay */
+.medbtn.erasb{background:#fff;color:#e33;border-color:#f0b4b4}
+#eraseOv{display:none;position:fixed;inset:0;background:#111;z-index:72;flex-direction:column}
+#eraseOv.on{display:flex}
+.er-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;color:#fff}
+.er-head b{font-size:15px}
+.er-head .er-close{border:none;background:none;color:#fff;font-size:22px;cursor:pointer;padding:4px 8px}
+#erStage{flex:1 1 auto;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+#erStage img{max-width:100%;max-height:100%;display:block}
+#erShow{position:absolute;pointer-events:none}
+.er-tip{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);color:#fff;font-size:13px;padding:6px 14px;border-radius:18px;white-space:nowrap;z-index:3}
+.er-bar{flex:0 0 auto;display:flex;gap:10px;padding:14px 16px;padding-bottom:calc(14px + env(safe-area-inset-bottom));background:#1b1b1f}
+.er-bar button{flex:1;padding:12px;border:none;border-radius:12px;font-size:15px;cursor:pointer}
+.er-bar .undo,.er-bar .cls{background:#333;color:#fff}
+.er-bar .done{background:var(--accent);color:#fff}
 </style>
 <!-- 媒体查看器 (点击放大) -->
 <div id="viewer" onclick="vzClose()">
@@ -256,6 +271,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 涂抹擦除 overlay -->
+<div id="eraseOv">
+  <div class="er-head"><b>🧹 涂抹要擦除的物体</b><button class="er-close" onclick="eraseCancel()">✕</button></div>
+  <div id="erStage">
+    <img id="erImg" alt="">
+    <canvas id="erShow"></canvas>
+    <canvas id="erMask" style="display:none"></canvas>
+    <div class="er-tip" id="erTip">用手指涂抹要擦掉的区域（半透明标记）</div>
+  </div>
+  <div class="er-bar">
+    <button class="undo" onclick="erUndo()">↩ 撤销</button>
+    <button class="cls" onclick="erClear()">🗑 清空</button>
+    <button class="done" onclick="eraseFinish()">✓ 完成</button>
+  </div>
+</div>
 
 <!-- 登录页 -->
 <div id="login">
@@ -451,7 +482,7 @@ function mSrc(u){ return (u&&String(u).startsWith('data:'))?u:(API+'/api/media?u
 function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url); }   // 走 https 代理, 规避私网IP/ATS
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
-  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; const ed=(m.type!=='video'?'<button class="medbtn editb" type="button" data-url="'+esc(m.url)+'" onclick="editPrompt(this.dataset.url)">🖊 改图</button>':''); const q=(m.type!=='video'?'<button class="medbtn quoteb" type="button" data-url="'+esc(m.url)+'">🔗 引用</button>':''); return q+ed+'<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
+  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; const ed=(m.type!=='video'?'<button class="medbtn editb" type="button" data-url="'+esc(m.url)+'" onclick="editPrompt(this.dataset.url)">🖊 改图</button>':''); const er=(m.type!=='video'?'<button class="medbtn erasb" type="button" data-url="'+esc(m.url)+'" onclick="erasePrompt(this.dataset.url)">🧹 擦除</button>':''); const q=(m.type!=='video'?'<button class="medbtn quoteb" type="button" data-url="'+esc(m.url)+'">🔗 引用</button>':''); return q+ed+er+'<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
   return '<div class="medac">'+saves+'<button class="medbtn delb" onclick="delMsg(this)">🗑 删除</button></div>';
 }
 function delMsg(btn){
@@ -928,6 +959,81 @@ async function editImage(imgUrl,p){
   }catch(e){ failMsg(lm, e.message); }
   scrollBottom();
 }
+
+// ---------- 涂抹擦除 (mask + remove LoRA, 按接入指南 7.1) ----------
+// 移除类：用户涂抹标记要擦掉的物体 -> 生成 mask(白=涂) -> /api/edit 带 use_lora:'remove' + edit_strength:1.0，
+// mask 外用原图像素直接贴回，所以"只擦目标、其余完全不变"。与"改图"(指令式微调)分开两条链路。
+let erUrl='', erStrokes=[], erDrawing=false, erLast=null;
+function erasePrompt(url){
+  erUrl=url; erStrokes=[];
+  const ov=$('eraseOv'); ov.classList.add('on');
+  const img=$('erImg'); img.src=mSrc(url);
+  img.onload=()=>{ erLayout(); erRedraw(); };
+}
+function erLayout(){
+  const img=$('erImg'), show=$('erShow'), maskc=$('erMask'), stage=$('erStage');
+  const ir=img.getBoundingClientRect(), sr=stage.getBoundingClientRect();
+  const w=Math.max(1,Math.round(ir.width)), h=Math.max(1,Math.round(ir.height));
+  show.width=w; show.height=h; maskc.width=w; maskc.height=h;
+  show.style.left=(ir.left-sr.left)+'px'; show.style.top=(ir.top-sr.top)+'px';
+}
+function erPos(e){
+  const c=$('erShow').getBoundingClientRect();
+  const cx=(e.touches&&e.touches[0])?e.touches[0].clientX:(e.clientX||0);
+  const cy=(e.touches&&e.touches[0])?e.touches[0].clientY:(e.clientY||0);
+  return {x:cx-c.left, y:cy-c.top};
+}
+function erDown(e){ if(!erUrl)return; e.preventDefault(); erDrawing=true; erLast=null; erBegin(erPos(e)); }
+function erMove(e){ if(!erDrawing)return; e.preventDefault(); var pt=erPos(e); if(erLast) erLast.push(pt); erRedraw(); }
+function erUp(){ erDrawing=false; erLast=null; }
+function erBegin(pt){ erStrokes.push([pt]); erLast=erStrokes[erStrokes.length-1]; erRedraw(); }
+function erRedraw(){
+  const show=$('erShow'), maskc=$('erMask');
+  if(!show.width||!show.height) return;
+  const sctx=show.getContext('2d'), mctx=maskc.getContext('2d');
+  sctx.clearRect(0,0,show.width,show.height); mctx.clearRect(0,0,maskc.width,maskc.height);
+  const lw=Math.max(20, Math.round(show.width*0.05));  // 笔刷按图宽自适应
+  sctx.lineCap='round'; sctx.lineJoin='round'; sctx.lineWidth=lw; sctx.strokeStyle='rgba(255,60,60,0.5)';
+  mctx.lineCap='round'; mctx.lineJoin='round'; mctx.lineWidth=lw; mctx.strokeStyle='#fff';
+  erStrokes.forEach(st=>{ if(!st.length)return; sctx.beginPath(); mctx.beginPath();
+    st.forEach((p,i)=>{ if(i===0){ sctx.moveTo(p.x,p.y); mctx.moveTo(p.x,p.y);} else { sctx.lineTo(p.x,p.y); mctx.lineTo(p.x,p.y);} });
+    sctx.stroke(); mctx.stroke(); });
+}
+function erUndo(){ erStrokes.pop(); erRedraw(); }
+function erClear(){ erStrokes=[]; erRedraw(); }
+function eraseCancel(){ const ov=$('eraseOv'); ov.classList.remove('on'); erStrokes=[]; erDrawing=false; }
+function eraseFinish(){
+  const maskc=$('erMask');
+  const px=maskc.getContext('2d').getImageData(0,0,maskc.width,maskc.height).data;
+  let any=false; for(var i=3;i<px.length;i+=4){ if(px[i]>40){ any=true; break; } }
+  if(!any){ toast('请先涂抹要擦除的区域'); return; }
+  const maskB64=maskc.toDataURL('image/png').split(',')[1];
+  const p=prompt('要擦掉涂抹区域里的什么？例如：耳机 / 水印 / 背景里的人');
+  const obj=(p||'').trim();
+  if(!obj){ eraseCancel(); return; }
+  const url=erUrl; eraseCancel();
+  eraseImage(url, obj, maskB64);
+}
+async function eraseImage(imgUrl,obj,maskB64){
+  const lm=loadingMsg('');
+  try{
+    const r=await apiFetch(API+'/api/edit',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt:'去掉'+obj,image_url:imgUrl,mask_base64:maskB64,use_lora:'remove',edit_strength:1.0})});
+    const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'擦除失败');
+    lastImageUrl=j.image_url;
+    fillMsg(lm.m, lm.el, {display:'已擦除', media:[{type:'image',url:j.image_url}], extraHtml:editBtnHtml(j.image_url)});
+  }catch(e){ failMsg(lm, e.message); }
+  scrollBottom();
+}
+// 涂抹事件绑定
+(function(){ const st=$('erStage'); if(!st)return;
+  st.addEventListener('touchstart',erDown,{passive:false});
+  st.addEventListener('touchmove',erMove,{passive:false});
+  st.addEventListener('touchend',erUp);
+  st.addEventListener('mousedown',erDown);
+  st.addEventListener('mousemove',erMove);
+  st.addEventListener('mouseup',erUp);
+  st.addEventListener('mouseleave',erUp);
+})();
 
 // ---------- 联网搜索 (Tavily, 快) ----------
 async function doSearch(){
