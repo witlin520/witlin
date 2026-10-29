@@ -251,6 +251,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #erStage img{max-width:100%;max-height:100%;display:block}
 #erShow{position:absolute;pointer-events:none}
 .er-tip{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);color:#fff;font-size:13px;padding:6px 14px;border-radius:18px;white-space:nowrap;z-index:3}
+.er-brush{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:8px 16px;background:#222;color:#ccc;font-size:13px}
+.er-brush input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
+.er-brush .bv{min-width:34px;text-align:right;color:#fff}
 .er-bar{flex:0 0 auto;display:flex;gap:10px;padding:14px 16px;padding-bottom:calc(14px + env(safe-area-inset-bottom));background:#1b1b1f}
 .er-bar button{flex:1;padding:12px;border:none;border-radius:12px;font-size:15px;cursor:pointer}
 .er-bar .undo,.er-bar .cls{background:#333;color:#fff}
@@ -279,7 +282,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
     <img id="erImg" alt="">
     <canvas id="erShow"></canvas>
     <canvas id="erMask" style="display:none"></canvas>
-    <div class="er-tip" id="erTip">用手指涂抹要擦掉的区域（半透明标记）</div>
+    <div class="er-tip" id="erTip">用手指涂抹要修改/擦除的区域（半透明标记）</div>
+  </div>
+  <div class="er-brush">
+    <span>✏️</span>
+    <input type="range" id="erBrush" min="8" max="120" value="40" oninput="erSetBrush(this.value)">
+    <span class="bv" id="erBrushV">40</span>
   </div>
   <div class="er-bar">
     <button class="undo" onclick="erUndo()">↩ 撤销</button>
@@ -959,7 +967,12 @@ async function editImage(imgUrl,p){
 // ---------- 涂抹擦除 (mask + remove LoRA, 按接入指南 7.1) ----------
 // 移除类：用户涂抹标记要擦掉的物体 -> 生成 mask(白=涂) -> /api/edit 带 use_lora:'remove' + edit_strength:1.0，
 // mask 外用原图像素直接贴回，所以"只擦目标、其余完全不变"。与"改图"(指令式微调)分开两条链路。
-let erUrl='', erStrokes=[], erDrawing=false, erLast=null;
+let erUrl='', erStrokes=[], erDrawing=false, erLast=null, erBrushLw=0;
+function erSetBrush(v){
+  erBrushLw=parseInt(v)||40;
+  const bv=$('erBrushV'); if(bv) bv.textContent=erBrushLw;
+  erRedraw();
+}
 function erasePrompt(url){
   erUrl=url; erStrokes=[];
   const ov=$('eraseOv'); ov.classList.add('on');
@@ -972,6 +985,15 @@ function erLayout(){
   const w=Math.max(1,Math.round(ir.width)), h=Math.max(1,Math.round(ir.height));
   show.width=w; show.height=h; maskc.width=w; maskc.height=h;
   show.style.left=(ir.left-sr.left)+'px'; show.style.top=(ir.top-sr.top)+'px';
+  // 画笔大小按图宽自适应，滑块可调
+  const br=$('erBrush');
+  if(br){
+    br.min=Math.max(4, Math.round(w*0.01));
+    br.max=Math.max(40, Math.round(w*0.2));
+    erBrushLw=Math.max(20, Math.round(w*0.05));
+    br.value=erBrushLw;
+    const bv=$('erBrushV'); if(bv) bv.textContent=erBrushLw;
+  }
 }
 function erPos(e){
   const c=$('erShow').getBoundingClientRect();
@@ -988,7 +1010,7 @@ function erRedraw(){
   if(!show.width||!show.height) return;
   const sctx=show.getContext('2d'), mctx=maskc.getContext('2d');
   sctx.clearRect(0,0,show.width,show.height); mctx.clearRect(0,0,maskc.width,maskc.height);
-  const lw=Math.max(20, Math.round(show.width*0.05));  // 笔刷按图宽自适应
+  const lw=erBrushLw || Math.max(20, Math.round(show.width*0.05));  // 笔刷按图宽自适应，可滑块调
   sctx.lineCap='round'; sctx.lineJoin='round'; sctx.lineWidth=lw; sctx.strokeStyle='rgba(255,60,60,0.5)';
   mctx.lineCap='round'; mctx.lineJoin='round'; mctx.lineWidth=lw; mctx.strokeStyle='#fff';
   erStrokes.forEach(st=>{ if(!st.length)return; sctx.beginPath(); mctx.beginPath();
@@ -1004,7 +1026,7 @@ function eraseFinish(){
   let any=false; for(var i=3;i<px.length;i+=4){ if(px[i]>40){ any=true; break; } }
   if(!any){ toast('请先涂抹要擦除的区域'); return; }
   const maskB64=maskc.toDataURL('image/png').split(',')[1];
-  const p=prompt('要擦掉涂抹区域里的什么？例如：耳机 / 水印 / 背景里的人');
+  const p=prompt('涂抹区域内要怎么改？可去掉或替换。例如：去掉耳机 / 换成性感衣服');
   const obj=(p||'').trim();
   if(!obj){ eraseCancel(); return; }
   const url=erUrl; eraseCancel();
@@ -1013,7 +1035,7 @@ function eraseFinish(){
 async function eraseImage(imgUrl,obj,maskB64){
   const lm=loadingMsg('');
   try{
-    const r=await apiFetch(API+'/api/edit',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt:'去掉'+obj,image_url:imgUrl,mask_base64:maskB64,use_lora:'remove',edit_strength:1.0})});
+    const r=await apiFetch(API+'/api/edit',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt:obj,image_url:imgUrl,mask_base64:maskB64,edit_strength:1.0})});
     const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'擦除失败');
     lastImageUrl=j.image_url;
     fillMsg(lm.m, lm.el, {display:'已擦除', media:[{type:'image',url:j.image_url}]});
