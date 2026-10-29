@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R "$GITHUB_WORKSPACE/build/App.xcarchive/Products/Applications/"*.app Payload/
-          cd Payload && zip -r ../App-unsigned.ipa *.app
+          zip -r -X App-unsigned.ipa Payload/App.app
 
       - name: 上传 ipa 产物
         uses: actions/upload-artifact@v4
