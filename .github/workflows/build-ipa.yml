@@ -51,6 +51,11 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 选择图片需要访问相册" ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c "Delete :NSPhotoLibraryAddUsageDescription" ios/App/App/Info.plist 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 保存图片需要访问相册" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion zh_CN" ios/App/App/Info.plist 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string zh_CN" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleLocalizations" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:0 string zh-Hans" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:1 string en" ios/App/App/Info.plist
 
       - name: 构建 unsigned App
         run: |

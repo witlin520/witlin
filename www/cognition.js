@@ -20,11 +20,18 @@ const _ready = (async () => {
   }
 })();
 
+const _cache = new Map();
 async function embedOne(text) {
   await _ready;
   if (!_extractor) throw _err || new Error('cog unavailable');
-  const out = await _extractor(String(text || '').slice(0, 512), { pooling: 'mean', normalize: true });
-  return out.data;
+  const key = String(text || '').slice(0, 512);
+  const hit = _cache.get(key);
+  if (hit) return hit;
+  const out = await _extractor(key, { pooling: 'mean', normalize: true });
+  const v = out.data;
+  if (_cache.size >= 500) _cache.delete(_cache.keys().next().value);
+  _cache.set(key, v);
+  return v;
 }
 function cos(a, b) {
   let s = 0; const n = Math.min(a.length, b.length);
