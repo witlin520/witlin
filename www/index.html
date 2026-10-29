@@ -231,8 +231,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <style>
 #viewer{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.93);display:none;align-items:center;justify-content:center}
 #viewer.on{display:flex}
-#vstage{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
-#vstage img{max-width:100%;max-height:100%;display:block;transition:width .15s}
+#vstage{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none}
+#vstage img{max-width:100%;max-height:100%;display:block;transform-origin:center center;will-change:transform;transition:none}
 #vstage video{max-width:100%;max-height:100%;display:none;background:#000}
 .v-x{position:fixed;top:calc(env(safe-area-inset-top) + 8px);right:calc(env(safe-area-inset-right) + 8px);z-index:10002;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.22);color:#fff;font-size:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
 .v-zoom{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:10001;display:none;align-items:center;gap:12px;color:#fff;background:rgba(255,255,255,.14);padding:6px 14px;border-radius:22px}
@@ -243,7 +243,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 <!-- 媒体查看器 (点击放大) -->
 <div id="viewer" onclick="vzClose()">
   <div id="vstage" onclick="event.stopPropagation()">
-    <img id="vimg" onclick="vzTap()" alt="">
+    <img id="vimg" alt="">
     <video id="vvid" controls onclick="event.stopPropagation()"></video>
   </div>
   <button class="v-x" onclick="vzClose()">✕</button>
@@ -486,9 +486,22 @@ function viewMedia(arr,idx){
   $('vzoom').classList.toggle('on', vType==='image');
 }
 function vzClose(){ const v=$('viewer'); v.classList.remove('on'); const vd=$('vvid'); vd.pause(); vd.removeAttribute('src'); }
-function vzFit(){ vFit=true; const im=$('vimg'); im.style.width=''; im.style.maxWidth='100%'; im.style.maxHeight='100%'; $('vzoomv').textContent='适配'; }
-function vzTap(){ if(vFit){ vFit=false; const im=$('vimg'); const w=window.innerWidth*2; im.style.width=w+'px'; im.style.maxWidth='none'; im.style.maxHeight='none'; $('vzoomv').textContent='200%'; } else vzFit(); }
-function vzAdj(d){ const im=$('vimg'); let w=parseFloat(im.style.width)||0; if(vFit){ vFit=false; w=window.innerWidth; } w+=d*Math.round(window.innerWidth*0.5); w=Math.max(window.innerWidth*0.5, w); w=Math.min(w, (im.naturalWidth||window.innerWidth)*4); im.style.width=w+'px'; im.style.maxWidth='none'; im.style.maxHeight='none'; $('vzoomv').textContent=Math.round(w/window.innerWidth*100)+'%'; }
+let vScale=1,vTx=0,vTy=0;
+function vApply(){ const im=$('vimg'); if(im) im.style.transform='translate('+vTx+'px,'+vTy+'px) scale('+vScale+')'; const z=$('vzoomv'); if(z) z.textContent=Math.round(vScale*100)+'%'; }
+function vzFit(){ vScale=1; vTx=0; vTy=0; vApply(); }
+function vzTap(){ vScale=(vScale>1?1:2); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
+function vzAdj(d){ vScale=Math.min(3,Math.max(1,Math.round((vScale+d*0.5)*10)/10)); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
+(function(){ const stage=$('vstage'); if(!stage) return; let sd=0,ss=1,ps=null;
+  stage.addEventListener('touchstart',function(e){
+    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; sd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; ss=vScale; e.preventDefault(); }
+    else if(e.touches.length===1 && vScale>1){ ps={x:e.touches[0].clientX,y:e.touches[0].clientY,tx:vTx,ty:vTy}; }
+  },{passive:false});
+  stage.addEventListener('touchmove',function(e){
+    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; vScale=Math.min(3,Math.max(1,ss*(d/sd))); if(vScale<=1){vTx=0;vTy=0;} vApply(); e.preventDefault(); }
+    else if(e.touches.length===1 && ps){ vTx=ps.tx+(e.touches[0].clientX-ps.x); vTy=ps.ty+(e.touches[0].clientY-ps.y); vApply(); e.preventDefault(); }
+  },{passive:false});
+  stage.addEventListener('touchend',function(e){ if(e.touches.length<2) sd=0; if(e.touches.length===0) ps=null; });
+})();
 
 // ---------- 新对话图标显隐 (有对话才显示) ----------
 function updateNewBtn(){
@@ -721,10 +734,12 @@ window.addEventListener('keydown',e=>{if(e.key==='Enter'&&$('login').style.displ
 async function send(){
   const txt=$('input').value.trim();
   if(sending)return;
-  if(!txt&&pendingImages.length===0)return;
+  if(!txt&&pendingImages.length===0&&!refImg)return;
   showChat();
   const imgs=pendingImages.slice();
-  commitMsg('user', txt, imgs, []);      // 用户消息入会话
+  const msgImgs=imgs.slice(); const msgMedia=[];
+  if(refImg){ if(/^https?:/.test(refImg)) msgMedia.push({type:'image',url:refImg}); else msgImgs.push(refImg); }
+  commitMsg('user', txt, msgImgs, msgMedia);   // 引用的图也显示在消息里, 像上传图一样
   $('input').value='';pendingImages=[];renderPreview();
   sending=true;$('send')&&($('send').disabled=true);
   const lm=loadingMsg();
