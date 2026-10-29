@@ -21,6 +21,16 @@ jobs:
       - name: 生成 iOS 工程
         run: npx cap add ios
 
+      - name: 同步原生插件与 Pods
+        run: npx cap sync ios
+
+      - name: 注入 iOS 权限描述(麦克风/语音识别)
+        run: |
+          /usr/libexec/PlistBuddy -c "Delete :NSMicrophoneUsageDescription" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 语音输入需要麦克风权限" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Delete :NSSpeechRecognitionUsageDescription" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string 语音识别需要语音权限" ios/App/App/Info.plist
+
       - name: 构建 unsigned App
         run: |
           cd ios/App
