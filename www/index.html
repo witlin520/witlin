@@ -421,7 +421,8 @@ async function startNativeVoice(CP){
 }
 
 // ---------- 媒体保存/删除 ----------
-function mediaSaveHref(url){ return '/api/media?url='+encodeURIComponent(url); }   // 同源代理, 规避跨域/私网IP
+function mSrc(u){ return (u&&String(u).startsWith('data:'))?u:(API+'/api/media?url='+encodeURIComponent(u)); }
+function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url); }   // 走 https 代理, 规避私网IP/ATS
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
   const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; return '<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
@@ -440,8 +441,8 @@ function mediaHtml(med){
   if(!med||!med.length) return '';
   const arr=med.map(m=>({type:m.type,url:m.url}));
   const inner=med.map((m,i)=> m.type==='video'
-     ? `<video controls src="${esc(m.url)}"></video>`
-     : `<img src="${esc(m.url)}" data-i="${i}" onclick="vzOpen(this)" loading="lazy">`).join('');
+     ? `<video controls src="${esc(mSrc(m.url))}"></video>`
+     : `<img src="${esc(mSrc(m.url))}" data-i="${i}" onclick="vzOpen(this)" loading="lazy">`).join('');
   return `<div class="media" data-media="${esc(JSON.stringify(arr))}">${inner}</div>`;
 }
 let vType='image',vList=[],vCur=0,vFit=true;
