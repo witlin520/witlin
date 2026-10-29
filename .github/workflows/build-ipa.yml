@@ -16,12 +16,27 @@ jobs:
           node-version: 20
 
       - name: 安装依赖
-        run: npm install
+        run: npm install --omit=optional
+
+      - name: 准备端侧模型与运行时
+        run: |
+          set -e
+          mkdir -p www/ort www/models/Xenova/bge-small-zh-v1.5/onnx
+          cp node_modules/@xenova/transformers/dist/transformers.min.js www/
+          cp node_modules/@xenova/transformers/dist/ort-wasm-simd.wasm www/ort/
+          cp node_modules/@xenova/transformers/dist/ort-wasm.wasm www/ort/
+          B=https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main
+          curl -L --fail -o www/models/Xenova/bge-small-zh-v1.5/onnx/model_quantized.onnx "$B/onnx/model_quantized.onnx"
+          curl -L --fail -o www/models/Xenova/bge-small-zh-v1.5/tokenizer.json "$B/tokenizer.json"
+          curl -L --fail -o www/models/Xenova/bge-small-zh-v1.5/tokenizer_config.json "$B/tokenizer_config.json"
+          curl -L --fail -o www/models/Xenova/bge-small-zh-v1.5/config.json "$B/config.json"
+          test "$(stat -f%z www/models/Xenova/bge-small-zh-v1.5/onnx/model_quantized.onnx)" -gt 20000000
+          echo "模型与运行时就绪，www 大小:"; du -sh www
 
       - name: 生成 iOS 工程
         run: npx cap add ios
 
-      - name: 同步原生插件与 Pods
+      - name: 同步原生插件、web 资源与 Pods
         run: npx cap sync ios
 
       - name: 注入 iOS 权限描述(麦克风/语音识别)
