@@ -228,7 +228,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #vstage{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
 #vstage img{max-width:100%;max-height:100%;display:block;transition:width .15s}
 #vstage video{max-width:100%;max-height:100%;display:none;background:#000}
-.v-x{position:fixed;top:12px;right:12px;z-index:10001;width:40px;height:40px;border-radius:50%;border:none;background:rgba(255,255,255,.16);color:#fff;font-size:20px;cursor:pointer}
+.v-x{position:fixed;top:calc(env(safe-area-inset-top) + 8px);right:calc(env(safe-area-inset-right) + 8px);z-index:10002;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.22);color:#fff;font-size:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
 .v-zoom{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:10001;display:none;align-items:center;gap:12px;color:#fff;background:rgba(255,255,255,.14);padding:6px 14px;border-radius:22px}
 .v-zoom.on{display:flex}
 .v-zoom button{width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:18px;cursor:pointer}
@@ -276,7 +276,17 @@ let sessionToken=null;try{sessionToken=localStorage.getItem('oc_session')}catch(
 const SKEY='oc_sessions';
 let sessions=[]; let curId=null; let msgSeq=0;
 function loadSessions(){ try{ const a=JSON.parse(localStorage.getItem(SKEY)||'[]'); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
-function saveSess(){ try{ localStorage.setItem(SKEY, JSON.stringify(sessions)); }catch(e){} }
+function saveSess(){
+  const dump=()=>JSON.stringify(sessions);
+  try{ localStorage.setItem(SKEY, dump()); return; }catch(e){}
+  // 配额不足: 从最旧会话开始丢弃内嵌图片, 保证会话本身能存下
+  for(let si=sessions.length-1; si>=0; si--){
+    const s=sessions[si]; let freed=false;
+    for(const m of s.messages){ if(m.images&&m.images.length){ m.images=[]; m.hasImgs=false; freed=true; } }
+    if(!freed) continue;
+    try{ localStorage.setItem(SKEY, dump()); return; }catch(e){}
+  }
+}
 function genSid(){ return 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function curSession(){ return sessions.find(s=>s.id===curId)||null; }
 function curMsgs(){ const s=curSession(); return s?s.messages:[]; }
@@ -456,8 +466,8 @@ function viewMedia(arr,idx){
   vType=vList[vCur].type||'image';
   const v=$('viewer'),im=$('vimg'),vd=$('vvid');
   v.classList.add('on');
-  if(vType==='image'){ im.style.display='block'; vd.style.display='none'; im.src=vList[vCur].url; vzFit(); }
-  else { vd.style.display='block'; im.style.display='none'; vd.src=vList[vCur].url; vd.play(); }
+  if(vType==='image'){ im.style.display='block'; vd.style.display='none'; im.src=mSrc(vList[vCur].url); vzFit(); }
+  else { vd.style.display='block'; im.style.display='none'; vd.src=mSrc(vList[vCur].url); vd.play(); }
   $('vzoom').classList.toggle('on', vType==='image');
 }
 function vzClose(){ const v=$('viewer'); v.classList.remove('on'); const vd=$('vvid'); vd.pause(); vd.removeAttribute('src'); }
@@ -486,7 +496,7 @@ function addMsg(role,text,images,media,id){
 function commitMsg(role, text, images, media){
   const s=ensureSession();
   const id=++msgSeq;
-  const m={id, role, text:text||'', display:text||'', media:media||[], hasImgs:!!(images&&images.length), loading:false};
+  const m={id, role, text:text||'', display:text||'', images:(images||[]).slice(), media:media||[], hasImgs:!!(images&&images.length), loading:false};
   s.messages.push(m);
   const el=addMsg(role, text, images, media, id);
   autoTitle(s); saveSess(); updateNewBtn();
@@ -637,8 +647,10 @@ function showSession(id){
     s.messages.forEach(m=>{
       if(m.loading){ const el=addMsg('ai','',[],[],m.id); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
       else {
-        const disp=(m.role==='user'&&m.hasImgs&&!m.text)?'📷 [图片]':(m.display||m.text);
-        addMsg(m.role, disp, [], m.media||[], m.id);
+        const imgs=Array.isArray(m.images)?m.images:[];
+        let disp=(m.display||m.text);
+        if(m.role==='user'&&m.hasImgs&&!imgs.length&&!disp) disp='📷 [图片]';
+        addMsg(m.role, disp, imgs, m.media||[], m.id);
       }
     });
     // 恢复最近一张图, 便于后续改图上下文
