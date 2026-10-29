@@ -757,7 +757,7 @@ async function send(){
 }
 
 function fileClick(){$('file').click()}
-$('file').addEventListener('change',e=>{const files=[...e.target.files];files.forEach(f=>{const rd=new FileReader();rd.onload=async()=>{const b64=await shrinkImage(rd.result,1280,0.85);pendingImages.push(b64);renderPreview()};rd.readAsDataURL(f)});e.target.value=''});
+$('file').addEventListener('change',e=>{const files=[...e.target.files];files.forEach(f=>{const rd=new FileReader();rd.onload=async()=>{const b64=await shrinkImage(rd.result,1536,0.9);pendingImages.push(b64);renderPreview()};rd.readAsDataURL(f)});e.target.value=''});
 async function shrinkImage(dataUrl,maxDim,q){return new Promise(res=>{const img=new Image();img.onload=()=>{let w=img.naturalWidth,h=img.naturalHeight;const m=Math.max(w,h);if(m>maxDim){const s=maxDim/m;w=w*s;h=h*s;}w=Math.max(64,Math.min(maxDim,Math.floor(w/64)*64));h=Math.max(64,Math.min(maxDim,Math.floor(h/64)*64));try{const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);res(cv.toDataURL('image/jpeg',q).split(',')[1]);}catch(err){res(dataUrl.split(',')[1]);}};img.onerror=()=>res(dataUrl.split(',')[1]);img.src=dataUrl;});}
 function renderPreview(){const p=$('preview');p.innerHTML='';pendingImages.forEach((b,i)=>{const d=document.createElement('div');d.className='pthumb';d.innerHTML='<img src="data:image/jpeg;base64,'+b+'"><span class="del" onclick="delImg('+i+')">×</span>';p.appendChild(d)})}
 function delImg(i){pendingImages.splice(i,1);renderPreview()}
