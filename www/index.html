@@ -61,6 +61,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #preview .pthumb{position:relative}
 #preview img{width:54px;height:54px;object-fit:cover;border-radius:10px}
 #preview .del{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;background:#0008;color:#fff;font-size:12px;line-height:18px;text-align:center;cursor:pointer}
+#refbar{display:none;align-items:center;gap:8px;padding:4px 6px;margin-bottom:2px;font-size:12px;color:var(--accent)}
+#refbar img{width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}
+#refbar button{border:none;background:#eee;color:#666;border-radius:50%;width:22px;height:22px;font-size:12px;line-height:1;cursor:pointer}
+.thumbs .th{position:relative;display:inline-block}
+.thumbs .th .qref{position:absolute;right:2px;bottom:2px;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:2px 6px;border-radius:6px;cursor:pointer}
 #row{display:flex;align-items:center;gap:6px;background:#f4f4f6;border-radius:24px;padding:4px 8px}
 #row input[type=text]{flex:1;min-width:0;border:none;background:transparent;padding:8px 6px;font-size:15px;outline:none}
 .icon-btn{border:none;background:none;font-size:20px;cursor:pointer;color:#333;flex:0 0 auto;padding:0;min-width:40px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
@@ -163,6 +168,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 <!-- 底部输入栏 -->
 <div id="composer">
+  <div id="refbar"></div>
   <div id="preview"></div>
   <div id="row">
     <button class="icon-btn" title="拍照/添加图片" onclick="fileClick()">📷</button>
@@ -267,6 +273,15 @@ const API=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/
 let mode='image';let durSec=5;
 let videoSteps=16;let genRefs=[];let refAr=[];let genAudio=null;let genAudioName='';let genClips=[];   // 生视频: 步数 + 参考图 + 音频 + 参考视频
 let pendingImages=[];
+let refImg=null;   // 引用的图片: base64 或 http url
+function quoteImg(v){ if(!v) return; refImg=v; renderRefBar(); toast('已引用这张图，接着说要怎么改'); }
+function clearRef(){ refImg=null; renderRefBar(); }
+function renderRefBar(){ const el=$('refbar'); if(!el) return; if(!refImg){ el.style.display='none'; el.innerHTML=''; return; } const src=/^https?:/.test(refImg)?mSrc(refImg):('data:image/jpeg;base64,'+refImg); el.style.display='flex'; el.innerHTML='<span>🔗 已引用</span><img src="'+esc(src)+'"><button type="button" onclick="clearRef()">✕</button>'; }
+document.addEventListener('click',function(ev){
+  const t=ev.target; if(!t||!t.closest) return;
+  const qb=t.closest('.quoteb'); if(qb){ ev.stopPropagation(); quoteImg(qb.getAttribute('data-url')); return; }
+  const qt=t.closest('.qref'); if(qt){ ev.stopPropagation(); const im=qt.parentElement&&qt.parentElement.querySelector('img'); if(im){ const s=im.getAttribute('src')||''; quoteImg(s.indexOf(',')>=0?s.split(',')[1]:s); } }
+});
 let lastImageUrl=null;   // 最近一次生成/修改的图，作为后续上下文
 let sending=false;
 let curTab='chat';
@@ -435,7 +450,7 @@ function mSrc(u){ return (u&&String(u).startsWith('data:'))?u:(API+'/api/media?u
 function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url); }   // 走 https 代理, 规避私网IP/ATS
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
-  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; return '<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
+  const saves=arr.map((m,i)=>{ const ext=m.type==='video'?'mp4':'jpg'; const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext; const q=(m.type!=='video'?'<button class="medbtn quoteb" type="button" data-url="'+esc(m.url)+'">🔗 引用</button>':''); return q+'<a class="medbtn" href="'+esc(mediaSaveHref(m.url))+'" download="'+esc(fn)+'">💾 保存</a>'; }).join('');
   return '<div class="medac">'+saves+'<button class="medbtn delb" onclick="delMsg(this)">🗑 删除</button></div>';
 }
 function delMsg(btn){
@@ -486,7 +501,7 @@ function addMsg(role,text,images,media,id){
   const c=$('chat'),d=document.createElement('div');d.className='msg '+role;
   if(id!=null) d.dataset.mid=id;
   let html=role==='ai'?'<div class="avatar">✨</div>':'';
-  let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<img src="data:image/jpeg;base64,'+b+'">').join('')+'</div>':'';
+  let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<div class="th"><img src="data:image/jpeg;base64,'+b+'"><button class="qref" type="button">引用</button></div>').join('')+'</div>':'';
   let med=mediaHtml(media);
   let medAc=media&&media.length?medRowHtml(media):'';
   html+='<div class="bubble">'+thumbs+(text?'<div class="text">'+esc(text)+'</div>':'')+med+medAc+'</div>';
@@ -640,7 +655,7 @@ function forkSession(id){   // 在新对话中继续: 引用旧对话上下文, 
   toast('已在新对话中继续');
 }
 function showSession(id){
-  curId=id; const s=curSession();
+  curId=id; const s=curSession(); clearRef();
   $('chat').innerHTML='';
   if(s && s.messages.length){
     showChat();
@@ -662,7 +677,7 @@ function showSession(id){
 }
 function newSession(){
   curId=null; lastImageUrl=null; pendingImages=[]; genRefs=[]; refAr=[]; genClips=[]; genAudio=null; genAudioName='';
-  $('chat').innerHTML=''; $('input').value=''; renderPreview();
+  $('chat').innerHTML=''; $('input').value=''; renderPreview(); clearRef();
   showWel(); closeDrawer();
   toast('已新开对话');
 }
@@ -739,6 +754,7 @@ async function send(){
   }
   const s=curSession(); if(s && s.summary) body._compressContext=s.summary;
   let chatImgs = imgs.map(b=>({data:b,mime:'image/jpeg'}));
+  if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:'image/jpeg'}); }  // 引用的图片作为改图对象
   if(chatImgs.length===0 && lastImageUrl){ chatImgs=[{url:lastImageUrl}]; }   // 没传新图时带上上张图做上下文
   if(chatImgs.length)body.images=chatImgs;
   const ac=new AbortController();const to=setTimeout(()=>ac.abort(),90000);
@@ -749,6 +765,7 @@ async function send(){
     const prefix=j.searched?'<div style="font-size:12px;color:var(--accent);margin-bottom:6px">🌐 已联网搜索</div>':'';
     fillMsg(lm.m, lm.el, {text:j.reply||'', display:j.reply||'', media, prefix});
     speak(j.reply||'');
+    clearRef();
     const ss=curSession();
     if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
   }catch(e){ failMsg(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':e.message); }
