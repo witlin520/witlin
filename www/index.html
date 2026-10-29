@@ -277,12 +277,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 
 <!-- 涂抹擦除 overlay -->
 <div id="eraseOv">
-  <div class="er-head"><b>🧹 涂抹要擦除的物体</b><button class="er-close" onclick="eraseCancel()">✕</button></div>
+  <div class="er-head"><b>🧹 涂抹要修改的区域</b><button class="er-close" onclick="eraseCancel()">✕</button></div>
   <div id="erStage">
     <img id="erImg" alt="">
     <canvas id="erShow"></canvas>
     <canvas id="erMask" style="display:none"></canvas>
-    <div class="er-tip" id="erTip">用手指涂抹要修改/擦除的区域（半透明标记）</div>
+    <div class="er-tip" id="erTip">大致涂抹目标区域即可，系统自动识别只改目标、其他不动</div>
   </div>
   <div class="er-brush">
     <span>✏️</span>
@@ -1026,7 +1026,7 @@ function eraseFinish(){
   let any=false; for(var i=3;i<px.length;i+=4){ if(px[i]>40){ any=true; break; } }
   if(!any){ toast('请先涂抹要擦除的区域'); return; }
   const maskB64=maskc.toDataURL('image/png').split(',')[1];
-  const p=prompt('涂抹区域内要怎么改？可去掉或替换。例如：去掉耳机 / 换成性感衣服');
+  const p=prompt('大致涂抹即可。要如何处理涂抹区域？可去掉或替换。例如：去掉耳机 / 换成性感衣服');
   const obj=(p||'').trim();
   if(!obj){ eraseCancel(); return; }
   const url=erUrl; eraseCancel();
