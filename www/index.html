@@ -701,15 +701,19 @@ async function send(){
   sending=true;$('send')&&($('send').disabled=true);
   const lm=loadingMsg();
   let histArr=buildHist().slice(0,-1);   // 去掉刚写入的当前用户消息, 避免上下文重复
-  // 本地认知：用 embedding 判断新问题是不是延续上一话题，决定带多少历史
+  const hasNewImgs=imgs.length>0;
+  // 本地认知：判断是否新话题，决定带多少历史（长期记忆仍由压缩摘要兜底）
   try{
-    if(window.cog&&window.cog.isReady()&&txt&&histArr.length){
+    let isNew=false;
+    if(hasNewImgs){
+      isNew=true;   // 新上传图片=新视觉查询，不拖旧文字话题（图自带上下文，摘要兜底长期记忆）
+    }else if(window.cog&&window.cog.isReady()&&txt&&txt.length>4&&histArr.length){
       const prev=histArr.slice(-8).map(h=>h.content);
       const r=await window.cog.simHist(txt,prev);
-      const isNewTopic=(r.best<0.38)&&txt.length>6;   // 短追问(≤6字)一律当延续
-      if(isNewTopic){ histArr=histArr.slice(-2); }
-      console.log('[cog] sim',r.best.toFixed(3),isNewTopic?'新话题-只带最近一轮':'延续-正常窗口');
+      isNew=r.best<0.38;
+      console.log('[cog] sim',r.best.toFixed(3),isNew?'新话题-只带最近一轮':'延续-正常窗口');
     }
+    if(isNew) histArr=histArr.slice(-2);
   }catch(e){}
   const body={message:txt, history:histArr};
   // 按需自动定位: 仅当消息与位置相关(查天气/附近等)才定位并带上, 其余不定位
