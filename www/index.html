@@ -866,8 +866,15 @@ async function send(){
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
     const j=await r.json();
-    let media=[];if(j.media&&j.media.length)media=j.media;
+    let media=[];
     const prefix=j.searched?'<div style="font-size:12px;color:var(--accent);margin-bottom:6px">🌐 已联网搜索</div>':'';
+    if(j.task_id){
+      // 生图为长耗时任务: 锁屏/切后台后任务在服务端继续, 回来轮询取结果, 避免"Load failed"
+      fillMsg(lm.m, lm.el, {text:j.reply||'', display:j.reply||'', media:[], prefix});
+      media=await pollTask(j);   // 轮询直到 done 或超时; 失败抛出由外层处理
+    } else {
+      if(j.media&&j.media.length)media=j.media;
+    }
     fillMsg(lm.m, lm.el, {text:j.reply||'', display:j.reply||'', media, prefix});
     if(media.length){ const _im=media.find(x=>x.type==='image'); if(_im&&_im.url) lastImageUrl=_im.url; }   // chat出图也更新最近图, 便于接着改
     speak(j.reply||'');
@@ -877,6 +884,21 @@ async function send(){
   }catch(e){ failMsg(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':e.message); }
   finally{clearTimeout(to)}
   sending=false;if($('send'))$('send').disabled=false;scrollBottom();
+}
+// 生图任务轮询: 独立短请求逐个拉取, 锁屏/切后台恢复后能继续, 不会因单次长请求被杀而丢结果
+async function pollTask(j){
+  const t0=Date.now();
+  for(;;){
+    let st=null;
+    try{
+      const r=await apiFetch(API+'/api/task/'+j.task_id,{headers:authHeaders()});
+      st=await r.json();
+    }catch(e){ st=null; }   // 网络瞬时错误/被挂起: 忽略, 下一轮再试
+    if(st && st.ok && st.status==='done') return st.media||[];
+    if(st && st.ok && st.status==='failed') throw new Error(st.err||'生成失败');
+    if(Date.now()-t0 > 600000) throw new Error('生成超时，请稍后重试');   // 10 分钟上限
+    await new Promise(r2=>setTimeout(r2,3000));
+  }
 }
 
 function fileClick(){$('file').click()}
