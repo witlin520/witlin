@@ -524,7 +524,8 @@ async function saveMedia(url){
     const fname='SOUL_'+Date.now()+'.'+ext;
     const file=new File([blob], fname, {type:blob.type||'image/jpeg'});
     // 系统分享面板(iOS 列出"存储图像", Android 列出下载/分享)
-    if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+    // 直接尝试 share(部分 WKWebView 无 canShare 但 share 可用, 放宽判断; 抛错则走降级)
+    if(navigator.share){
       try{ await navigator.share({files:[file], title:'保存图片'}); toast('已打开系统面板，选「存储图像」存入相册'); return; }
       catch(e){ if(e&&e.name==='AbortError') return; /* 用户取消 */ }
     }
