@@ -687,6 +687,17 @@ function showWel(){ $('welcome').style.display='block'; $('chat').style.display=
 function showChat(){ $('welcome').style.display='none'; $('chat').style.display='block'; updateNewBtn(); }
 function focusInput(){ const i=$('input'); i.focus(); }
 function chipText(t){ $('input').value=t; send(); }
+// 前端规则意图识别(快, 零延迟): 命中就返回,intent 可选 chat/image/video/edit/erase/web/location
+function ruleIntent(msg, hasImg){
+  msg=msg||'';
+  if(/天气|气温|温度|预报|降雨|下雨|下雪|台风|雾|晴|阴|风力|风|新闻|汇率|美元|日元|欧元|股价|涨停|跌|基金|赛果|比分|几点|时间|多少钱|油价|学费|房价|股票/i.test(msg)) return {intent:'web'};
+  if(/附近|周边|离我|导航|定位|怎么去|去哪儿|在哪|坐标/.test(msg)) return {intent:'location'};
+  if(/画一个|画个|画只|画张|画幅|帮我画|给我画|生成.*(图|图片|画)|配个图|做个图|生成一张|画一|绘制|画一只|画一个/.test(msg)) return {intent:'image'};
+  if(/视频|动图|动画|短片|生成.*(视频|动画|短片)|做个.*(视频|动画)|一段视频/.test(msg)) return {intent:'video'};
+  if(hasImg && /去掉|移除|擦除|消除|抹掉|清除|删掉|拿掉|擦掉|祛除|去除|不要.*耳机|擦.*水印|去掉.*耳机|摘.*耳机|去掉|擦除|移除/.test(msg)) return {intent:'erase'};
+  if(hasImg && /换成|改成|染成|染|涂|变身|变成|穿上|西装|衣服|发型|发色|换成.*|改成.*色|变.*真人/.test(msg)) return {intent:'edit'};
+  return null;
+}
 
 // ---------- 会话：抽屉 / 列表 / 长按 / 新建 / 切换 ----------
 function openDrawer(){ $('drawer').classList.add('open'); $('drawerMask').style.display='block'; renderSessionList(); }
@@ -842,6 +853,15 @@ async function send(){
   if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:'image/jpeg'}); }  // 引用的图片作为改图对象
   if(chatImgs.length===0 && lastImageUrl){ chatImgs=[{url:lastImageUrl}]; }   // 没传新图时带上上张图做上下文
   if(chatImgs.length)body.images=chatImgs;
+  // 意图理解(混合): 前端规则先抓明确意图, 抓不住且涉及图/画/改/换等再调后端一次识别
+  let intentObj = ruleIntent(txt, !!(chatImgs.length||lastImageUrl));
+  if(!intentObj && (chatImgs.length>0 || !!lastImageUrl || /图|画|改|换|去|染|生成|视频|衣|发|水印|手表|耳机/.test(txt))){
+    try{
+      const ir=await apiFetch(API+'/api/intent',{method:'POST',headers:authHeaders(),body:JSON.stringify({message:txt, has_image:!!(chatImgs.length>0||lastImageUrl)})});
+      const ij=await ir.json(); if(ij&&ij.ok&&ij.intent) intentObj=ij.intent;
+    }catch(e){ /* 意图识别失败不影响主流程 */ }
+  }
+  if(intentObj) body._intent=intentObj;
   const ac=new AbortController();const to=setTimeout(()=>ac.abort(),300000); // 生成多图/agentic/联网搜索耗时长, 对齐后端 5 分钟, 避免"想久一点就失败"
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
