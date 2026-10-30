@@ -1065,6 +1065,30 @@ function refVideoWH(w,h){
   for(const x of R){ const d=Math.abs(x.r-ar); if(d<bd){ bd=d; best=x; } }
   return {width:best.w,height:best.h,ratio:best.key};
 }
+// 把参考图 cover 等比缩放+居中裁剪到目标尺寸(tw x th), 输出 jpeg dataURL
+// 目的: 交给生视频模型的参考图就是精确目标比例, 输出无拉伸、无黑边
+function coverToRatio(dataUrl, tw, th){
+  return new Promise(res=>{
+    if(typeof dataUrl!=='string'||dataUrl.indexOf('data:')!==0){ res(dataUrl); return; }
+    const im=new Image();
+    im.onload=()=>{
+      const iw=im.naturalWidth, ih=im.naturalHeight;
+      if(!iw||!ih){ res(dataUrl); return; }
+      try{
+        const cv=document.createElement('canvas'); cv.width=tw; cv.height=th;
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
+        const scale=Math.max(tw/iw, th/ih);      // cover: 取较大缩放, 填满目标框
+        const sw=tw/scale, sh=th/scale;          // 从原图裁出的源区域
+        const sx=(iw-sw)/2, sy=(ih-sh)/2;        // 居中裁剪
+        ctx.drawImage(im, sx, sy, sw, sh, 0, 0, tw, th);
+        res(cv.toDataURL('image/jpeg', 0.92));
+      }catch(e){ res(dataUrl); }
+    };
+    im.onerror=()=>res(dataUrl);
+    im.src=dataUrl;
+  });
+}
 async function doGen(){
   const prompt=$('prompt').value.trim();if(!prompt){toast('请输入提示词');return}
   toggleGen();showChat();
@@ -1079,15 +1103,22 @@ async function doGen(){
     }else{
       const body={prompt,duration:durSec,steps:videoSteps};
       if(genRefs.length){
-        body.images=[...genRefs];
-        // 按参考图比例对齐输出分辨率, 防止被 router 默认 1280x736 硬拉变形
+        let targetW=null, targetH=null;
+        // 按参考图比例对齐输出分辨率 + cover 等比缩放裁剪参考图, 输出无拉伸无黑边
         try{
           const dims=await imgDims(genRefs[0]);
           if(dims && dims.w && dims.h){
             const wh=refVideoWH(dims.w, dims.h);
-            if(wh){ body.width=wh.width; body.height=wh.height; }
+            if(wh){ targetW=wh.width; targetH=wh.height; }
           }
         }catch(e){}
+        // cover 每张参考图到目标比例(精确), 模型收到的是标准比例图, 不会被硬拉
+        body.images=[];
+        for(const ref of genRefs){
+          if(targetW && targetH){ body.images.push(await coverToRatio(ref, targetW, targetH)); }
+          else { body.images.push(ref); }
+        }
+        if(targetW && targetH){ body.width=targetW; body.height=targetH; }
       }
       if(genClips.length) body.video_clips=[...genClips];
       if(genAudio) body.audio=genAudio;
