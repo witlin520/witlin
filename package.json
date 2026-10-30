@@ -6,6 +6,7 @@
     "build": "echo '本地自包含 web，无需构建'"
   },
   "dependencies": {
+    "@capacitor-community/media": "^6.0.0",
     "@capacitor-community/speech-recognition": "^6.0.0",
     "@capacitor/android": "^6.2.0",
     "@capacitor/cli": "^6.2.0",

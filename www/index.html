@@ -509,30 +509,37 @@ function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url
 async function saveMedia(url){
   if(!url) return toast('没有可保存的图片');
   try{
-    let blob;
-    if(String(url).startsWith('data:')){
-      const m=String(url).match(/^data:([^;,]+)?(;base64)?,(.*)$/); if(!m) return toast('图片数据异常');
-      const bin=atob(m[3]||''); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-      blob=new Blob([arr], {type:(m[1]||'image/jpeg')});
-    }else{
+    // 先取 dataURL (原生相册插件 savePhoto 直接收 base64 data URI)
+    let dataUrl=String(url);
+    if(!dataUrl.startsWith('data:')){
       const r=await fetch(API+'/api/media?url='+encodeURIComponent(url));
       if(!r.ok) return toast('图片下载失败');
-      blob=await r.blob();
+      const blob=await r.blob();
+      dataUrl=await new Promise((res,rej)=>{const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(blob);});
     }
-    if(!blob||!blob.size) return toast('图片数据为空');
-    const ext=(blob.type||'').includes('png')?'png':'jpg';
-    const fname='SOUL_'+Date.now()+'.'+ext;
-    const file=new File([blob], fname, {type:blob.type||'image/jpeg'});
-    // 系统分享面板(iOS 列出"存储图像", Android 列出下载/分享)
-    // 直接尝试 share(部分 WKWebView 无 canShare 但 share 可用, 放宽判断; 抛错则走降级)
-    if(navigator.share){
-      try{ await navigator.share({files:[file], title:'保存图片'}); toast('已打开系统面板，选「存储图像」存入相册'); return; }
-      catch(e){ if(e&&e.name==='AbortError') return; /* 用户取消 */ }
+    if(!dataUrl) return toast('图片数据为空');
+    // 1) 原生相册一键直存 (首选, @capacitor-community/media 已接入, CI 配了 NSPhotoLibraryAddUsageDescription)
+    const Media=(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Media)||null;
+    if(Media&&Media.savePhoto){
+      try{ await Media.savePhoto({path:dataUrl}); return toast('已保存到相册'); }
+      catch(e){ /* 降级 */ }
     }
-    // 降级: 直接下载(旧系统/受限环境)
-    const bu=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=bu; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(bu),4000);
-    toast('已发起保存');
+    // 2) Web Share 系统面板(含"存储图像")
+    const m=dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+    if(m){
+      const bin=(m[3]||'').replace(/\s/g,''); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+      const blob=new Blob([arr], {type:(m[1]||'image/jpeg')});
+      const ext=(blob.type||'').includes('png')?'png':'jpg';
+      const fname='SOUL_'+Date.now()+'.'+ext;
+      const file=new File([blob], fname, {type:blob.type||'image/jpeg'});
+      if(navigator.share){
+        try{ await navigator.share({files:[file], title:'保存图片'}); return toast('已打开系统面板，选「存储图像」'); }
+        catch(e){ if(e&&e.name==='AbortError') return; }
+      }
+      // 3) 下载降级(旧系统/受限环境)
+      const bu=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=bu; a.download=fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(bu),4000);
+      return toast('已发起保存');
+    }
   }catch(e){ toast('保存失败'); }
 }
 // ---------- 媒体内存缓存(blob): 切会话/切后台不再重新拉取, 网络差也能显示 ----------
