@@ -523,7 +523,7 @@ function mediaHtml(med){
   const arr=med.map(m=>({type:m.type,url:m.url}));
   const inner=med.map((m,i)=>{
     const mediaEl = m.type==='video'
-      ? `<video controls src="${esc(mSrc(m.url))}"></video>`
+      ? `<video controls preload="metadata" playsinline src="${esc(mSrc(m.url))}" onerror="videoRetry(this)"></video>`
       : `<img src="${esc(mSrc(m.url))}" data-i="${i}" data-src="${esc(mSrc(m.url))}" onclick="vzOpen(this)" loading="lazy" onerror="mediaImgError(this)">`;
     const ext=m.type==='video'?'mp4':'jpg';
     const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext;
@@ -566,10 +566,42 @@ function viewMedia(arr,idx){
   const v=$('viewer'),im=$('vimg'),vd=$('vvid');
   v.classList.add('on');
   if(vType==='image'){ im.style.display='block'; vd.style.display='none'; im.src=mSrc(vList[vCur].url); vzFit(); }
-  else { vd.style.display='block'; im.style.display='none'; vd.src=mSrc(vList[vCur].url); vd.play(); }
+  else { vd.style.display='block'; im.style.display='none'; vd.setAttribute('playsinline',''); vd.onerror=()=>videoRetry(vd); vd.src=mSrc(vList[vCur].url); vd.play(); }
   $('vzoom').classList.toggle('on', vType==='image');
 }
 function vzClose(){ const v=$('viewer'); v.classList.remove('on'); const vd=$('vvid'); vd.pause(); vd.removeAttribute('src'); }
+// 视频加载失败重试: 强制重建代理 URL(打破锁屏后失效的连接), 最多重试2次
+function videoRetry(el){
+  if(!el) return;
+  let n=+(el.getAttribute('data-retry')||0);
+  const orig=el.getAttribute('data-orig');
+  let src=orig||el.getAttribute('src')||'';
+  if(!src){ return; }
+  // 用错误提示占位, 重试时重新拉
+  if(n>=2){ el.setAttribute('data-broken','1'); const holder=document.createElement('div'); holder.className='medi-broken'; holder.innerHTML='<button class="medbtn" type="button">🎬 视频加载失败，点击重试</button>'; holder.querySelector('button').onclick=()=>{ el.setAttribute('data-retry','0'); el.removeAttribute('data-broken'); holder.remove(); videoRetry(el); }; el.parentNode.insertBefore(holder, el.nextSibling); return; }
+  n++; el.setAttribute('data-retry',n); el.setAttribute('data-orig',src);
+  // 重新拼代理 URL, 加时间戳打破缓存/陈旧连接
+  let ns;
+  if(src.indexOf('/api/media?')>=0){ ns=src + (src.indexOf('?')>=0?'&':'?') + '_r=' + Date.now(); }
+  else { ns=src; }
+  el.onerror=null; el.setAttribute('src',ns); el.load&&el.load();
+  (el.play&&el.play()).catch(function(){});
+}
+
+// 切回前台时, 重载所有"正在播放"或"加载失败"的视频 (WKWebView 锁屏挂起会掐断媒体连接)
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden) return;
+  setTimeout(function(){
+    document.querySelectorAll('video').forEach(function(v){
+      const broken=v.getAttribute('data-broken');
+      const errState=v.error || (v.readyState===0 && v.getAttribute('src'));
+      if(broken){ v.removeAttribute('data-broken'); v.setAttribute('data-retry','0'); videoRetry(v); }
+      else if(v.error){ videoRetry(v); }
+      else if(v.paused && v.getAttribute('src') && (v.currentTime>0 || v.readyState>0)){ try{ v.play().catch(function(){}); }catch(e){} }
+    });
+  },600);
+});
+
 let vScale=1,vTx=0,vTy=0;
 function vApply(){ const im=$('vimg'); if(im) im.style.transform='translate('+vTx+'px,'+vTy+'px) scale('+vScale+')'; const z=$('vzoomv'); if(z) z.textContent=Math.round(vScale*100)+'%'; }
 function vzFit(){ vScale=1; vTx=0; vTy=0; vApply(); }
@@ -1015,6 +1047,24 @@ function renderClips(){
   });
   $('clipCount').textContent= genClips.length?('已选 '+genClips.length+' 段'):'';
 }
+// 读图片实际尺寸 (参考图是 dataURL), 用于生视频按比例对齐
+function imgDims(dataUrl){
+  return new Promise(res=>{
+    if(typeof dataUrl!=='string'||dataUrl.indexOf('data:')!==0){ res(null); return; }
+    const im=new Image();
+    im.onload=()=>{ const w=im.naturalWidth,h=im.naturalHeight; res((w&&h)?{w,h}:null); };
+    im.onerror=()=>res(null);
+    im.src=dataUrl;
+  });
+}
+// 图片宽高比 -> H3 支持比例预设 (与后端一致), 返回可用于 /api/video 的 width/height
+function refVideoWH(w,h){
+  if(!w||!h) return null;
+  const R=[{key:'21:9',r:21/9,w:1792,h:768},{key:'16:9',r:16/9,w:1344,h:768},{key:'4:3',r:4/3,w:1024,h:768},{key:'1:1',r:1,w:768,h:768},{key:'3:4',r:3/4,w:768,h:1024},{key:'9:16',r:9/16,w:768,h:1344}];
+  const ar=w/h; let best=R[0],bd=1e9;
+  for(const x of R){ const d=Math.abs(x.r-ar); if(d<bd){ bd=d; best=x; } }
+  return {width:best.w,height:best.h,ratio:best.key};
+}
 async function doGen(){
   const prompt=$('prompt').value.trim();if(!prompt){toast('请输入提示词');return}
   toggleGen();showChat();
@@ -1028,7 +1078,17 @@ async function doGen(){
       fillMsg(lm.m, lm.el, {display:'已生成', media:[{type:'image',url:j.image_url}]});
     }else{
       const body={prompt,duration:durSec,steps:videoSteps};
-      if(genRefs.length) body.images=[...genRefs];
+      if(genRefs.length){
+        body.images=[...genRefs];
+        // 按参考图比例对齐输出分辨率, 防止被 router 默认 1280x736 硬拉变形
+        try{
+          const dims=await imgDims(genRefs[0]);
+          if(dims && dims.w && dims.h){
+            const wh=refVideoWH(dims.w, dims.h);
+            if(wh){ body.width=wh.width; body.height=wh.height; }
+          }
+        }catch(e){}
+      }
       if(genClips.length) body.video_clips=[...genClips];
       if(genAudio) body.audio=genAudio;
       const r=await apiFetch(API+'/api/video',{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
