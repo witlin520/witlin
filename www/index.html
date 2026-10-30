@@ -560,6 +560,13 @@ function vzOpen(el){
   let arr=[]; try{ arr=JSON.parse(box.getAttribute('data-media')||'[]'); }catch(e){}
   viewMedia(arr, parseInt(el.dataset.i,10)||0);
 }
+// 上传图/引用图缩略图点击放大 (thumbs 区, 走同一个全屏查看器)
+function viewThumb(imgEl){
+  if(!imgEl) return;
+  const u=imgEl.getAttribute('data-u')||imgEl.getAttribute('src')||'';
+  if(!u) return;
+  viewMedia([{type:'image',url:u}], 0);
+}
 function viewMedia(arr,idx){
   vList=arr||[]; vCur=idx||0; if(!vList.length)return;
   vType=vList[vCur].type||'image';
@@ -630,7 +637,7 @@ function addMsg(role,text,images,media,id){
   const c=$('chat'),d=document.createElement('div');d.className='msg '+role;
   if(id!=null) d.dataset.mid=id;
   let html=role==='ai'?'<div class="avatar">✨</div>':'';
-  let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<div class="th"><img src="data:image/jpeg;base64,'+b+'"><button class="qref" type="button">引用</button></div>').join('')+'</div>':'';
+  let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<div class="th"><img src="data:image/jpeg;base64,'+b+'" data-u="data:image/jpeg;base64,'+b+'" loading="lazy" onclick="viewThumb(this)"><button class="qref" type="button">引用</button></div>').join('')+'</div>':'';
   let med=mediaHtml(media);
   let medAc=media&&media.length?medRowHtml(media):'';
   html+='<div class="bubble">'+thumbs+(text?'<div class="text">'+esc(text)+'</div>':'')+med+medAc+'</div>';
