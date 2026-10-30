@@ -103,6 +103,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .medi-item{margin-bottom:8px}
 .medi-item:last-child{margin-bottom:0}
 .medi-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.medi-broken{text-align:center;padding:10px 0;border:1px dashed var(--line);border-radius:12px;margin-bottom:6px}
 .medbtn{font-size:12px;padding:5px 11px;border:1px solid var(--line);border-radius:12px;background:#f5f5f7;color:#333;cursor:pointer;text-decoration:none;display:inline-block;line-height:1.3}
 .medbtn.delb{color:#e33}
 .medbtn.editb{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -368,7 +369,23 @@ function $(id){return document.getElementById(id)}
 function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2200)}
 function authHeaders(){return {'Content-Type':'application/json','Authorization':'Bearer '+sessionToken}}
 function clearAuth(){sessionToken=null;try{localStorage.removeItem('oc_session')}catch(e){};showLogin();toast('登录已过期，请重新登录')}
-async function apiFetch(url,opts={}){const r=await fetch(url,opts);if(r.status===401&&!url.includes('/api/login')){clearAuth()}return r}
+async function apiFetch(url,opts={}){
+  let last;
+  for(let a=0;a<3;a++){
+    try{
+      const r=await fetch(url,opts);
+      if(r.status===401&&!url.includes('/api/login'))clearAuth();
+      return r;
+    }catch(e){
+      last=e;
+      // 瞬时网络错误(断网/连接丢失/DNS)才自动重试; 被 signal abort(真超时) 不重试
+      const isAbort=(opts&&opts.signal&&opts.signal.aborted)||(e&&e.name==='AbortError');
+      if(a<2&&!isAbort){ await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
+      throw e;
+    }
+  }
+  throw last;
+}
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function scrollBottom(){const c=$('chat');c.scrollTop=c.scrollHeight}
 
@@ -510,7 +527,7 @@ function mediaHtml(med){
   const inner=med.map((m,i)=>{
     const mediaEl = m.type==='video'
       ? `<video controls src="${esc(mSrc(m.url))}"></video>`
-      : `<img src="${esc(mSrc(m.url))}" data-i="${i}" onclick="vzOpen(this)" loading="lazy">`;
+      : `<img src="${esc(mSrc(m.url))}" data-i="${i}" data-src="${esc(mSrc(m.url))}" onclick="vzOpen(this)" loading="lazy" onerror="mediaImgError(this)">`;
     const ext=m.type==='video'?'mp4':'jpg';
     const fn='SOUL_'+(m.type==='video'?'v':'i')+'_'+Date.now()+'_'+i+'.'+ext;
     let actions='<div class="medi-actions">';
@@ -523,6 +540,22 @@ function mediaHtml(med){
     return `<div class="medi-item">${mediaEl}${actions}</div>`;
   }).join('');
   return `<div class="media" data-media="${esc(JSON.stringify(arr))}">${inner}</div>`;
+}
+// 图片加载失败 -> 显示"点击重试", 点击恢复原图片
+function mediaImgError(el){
+  if(el.getAttribute('data-broken'))return;
+  el.setAttribute('data-broken','1');
+  el.style.display='none';
+  const holder=document.createElement('div');
+  holder.className='medi-broken';
+  holder.innerHTML='<button class="medbtn" type="button">🖼 图片加载失败，点击重试</button>';
+  holder.querySelector('button').onclick=()=>{
+    el.style.display='block';
+    el.setAttribute('src', el.getAttribute('data-src')||el.getAttribute('src'));
+    el.removeAttribute('data-broken');
+    holder.remove();
+  };
+  el.parentNode.insertBefore(holder, el.nextSibling);
 }
 let vType='image',vList=[],vCur=0,vFit=true;
 function vzOpen(el){
@@ -826,7 +859,7 @@ async function send(){
   if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:'image/jpeg'}); }  // 引用的图片作为改图对象
   if(chatImgs.length===0 && lastImageUrl){ chatImgs=[{url:lastImageUrl}]; }   // 没传新图时带上上张图做上下文
   if(chatImgs.length)body.images=chatImgs;
-  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),90000);
+  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),300000); // 生成多图/agentic/联网搜索耗时长, 对齐后端 5 分钟, 避免"想久一点就失败"
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
     const j=await r.json();
