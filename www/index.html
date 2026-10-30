@@ -505,6 +505,35 @@ async function startNativeVoice(CP){
 // ---------- 媒体保存/删除 ----------
 function mSrc(u){ return (u&&String(u).startsWith('data:'))?u:(API+'/api/media?url='+encodeURIComponent(u)); }
 function mediaSaveHref(url){ return API+'/api/media?url='+encodeURIComponent(url); }   // 走 https 代理, 规避私网IP/ATS
+// 保存图片到手机: 优先 Web Share 弹系统面板(iOS 含"存储图像"→存相册), 不再跳浏览器/<a download>失效
+async function saveMedia(url){
+  if(!url) return toast('没有可保存的图片');
+  try{
+    let blob;
+    if(String(url).startsWith('data:')){
+      const m=String(url).match(/^data:([^;,]+)?(;base64)?,(.*)$/); if(!m) return toast('图片数据异常');
+      const bin=atob(m[3]||''); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+      blob=new Blob([arr], {type:(m[1]||'image/jpeg')});
+    }else{
+      const r=await fetch(API+'/api/media?url='+encodeURIComponent(url));
+      if(!r.ok) return toast('图片下载失败');
+      blob=await r.blob();
+    }
+    if(!blob||!blob.size) return toast('图片数据为空');
+    const ext=(blob.type||'').includes('png')?'png':'jpg';
+    const fname='SOUL_'+Date.now()+'.'+ext;
+    const file=new File([blob], fname, {type:blob.type||'image/jpeg'});
+    // 系统分享面板(iOS 列出"存储图像", Android 列出下载/分享)
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:'保存图片'}); toast('已打开系统面板，选「存储图像」存入相册'); return; }
+      catch(e){ if(e&&e.name==='AbortError') return; /* 用户取消 */ }
+    }
+    // 降级: 直接下载(旧系统/受限环境)
+    const bu=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=bu; a.download=fname; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(bu),4000);
+    toast('已发起保存');
+  }catch(e){ toast('保存失败'); }
+}
 // ---------- 媒体内存缓存(blob): 切会话/切后台不再重新拉取, 网络差也能显示 ----------
 const MEDIA_CACHE = new Map();   // url -> blobObjectUrl
 async function mediaUrl(u){
@@ -572,7 +601,7 @@ function mediaHtml(med){
         +`<button class="medbtn editb" type="button" data-url="${esc(u)}" onclick="editPrompt(this.dataset.url)">🖊 改图</button>`
         +`<button class="medbtn erasb" type="button" data-url="${esc(u)}" onclick="erasePrompt(this.dataset.url)">🧹 涂抹</button>`;
     }
-    actions+=`<a class="medbtn" href="${esc(mediaSaveHref(u))}" download="${esc(fn)}">💾 保存</a>`
+    actions+=`<button class="medbtn" type="button" data-url="${esc(u)}" onclick="saveMedia(this.dataset.url)">💾 保存</button>`
       +`<button class="medbtn delb" type="button" onclick="delMsg(this)">🗑 删除</button></div>`;
     return `<div class="medi-item">${mediaEl}${actions}</div>`;
   }).join('');
