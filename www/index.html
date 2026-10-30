@@ -654,14 +654,14 @@ let vScale=1,vTx=0,vTy=0;
 function vApply(){ const im=$('vimg'); if(im) im.style.transform='translate('+vTx+'px,'+vTy+'px) scale('+vScale+')'; const z=$('vzoomv'); if(z) z.textContent=Math.round(vScale*100)+'%'; }
 function vzFit(){ vScale=1; vTx=0; vTy=0; vApply(); }
 function vzTap(){ vScale=(vScale>1?1:2); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
-function vzAdj(d){ vScale=Math.min(3,Math.max(1,Math.round((vScale+d*0.5)*10)/10)); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
+function vzAdj(d){ vScale=Math.min(8,Math.max(1,Math.round((vScale+d*0.5)*10)/10)); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
 (function(){ const stage=$('vstage'); if(!stage) return; let sd=0,ss=1,ps=null;
   stage.addEventListener('touchstart',function(e){
     if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; sd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; ss=vScale; e.preventDefault(); }
     else if(e.touches.length===1 && vScale>1){ ps={x:e.touches[0].clientX,y:e.touches[0].clientY,tx:vTx,ty:vTy}; }
   },{passive:false});
   stage.addEventListener('touchmove',function(e){
-    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; vScale=Math.min(3,Math.max(1,ss*(d/sd))); if(vScale<=1){vTx=0;vTy=0;} vApply(); e.preventDefault(); }
+    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; vScale=Math.min(8,Math.max(1,ss*(d/sd))); if(vScale<=1){vTx=0;vTy=0;} vApply(); e.preventDefault(); }
     else if(e.touches.length===1 && ps){ vTx=ps.tx+(e.touches[0].clientX-ps.x); vTy=ps.ty+(e.touches[0].clientY-ps.y); vApply(); e.preventDefault(); }
   },{passive:false});
   stage.addEventListener('touchend',function(e){ if(e.touches.length<2) sd=0; if(e.touches.length===0) ps=null; });
