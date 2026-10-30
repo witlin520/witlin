@@ -158,12 +158,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
   <!-- 欢迎态 -->
   <section id="welcome">
     <h1 class="hello">有什么我能帮你的吗？</h1>
-    <div class="welcome-tabs">
-      <button class="wtab on" onclick="switchTab('chat',this)">对话</button>
-      <button class="wtab" onclick="switchTab('work',this)">工作</button>
-    </div>
-    <div class="rec-title" id="recTitle">为你推荐</div>
-    <div id="recs" class="recs"></div>
     <div id="quickRow" class="quick-row"></div>
   </section>
 
@@ -682,17 +676,6 @@ const QUICK=[
 ];
 function renderWelcome(tab){
   curTab=tab;
-  const rs=$('recs'),ts=$('recTitle');
-  ts.textContent = tab==='chat' ? '为你推荐' : '工作台';
-  rs.innerHTML='';
-  RECS[tab].forEach(t=>{
-    const d=document.createElement('div');d.className='rec-card';d.textContent=t;
-    if(t.includes('生成一张图')){ d.onclick=()=>{ setMode('image'); toggleGen(); } }
-    else if(t.includes('生成一段视频')){ d.onclick=()=>{ setMode('video'); toggleGen(); } }
-    else if(t.includes('改一下刚才那张图')){ d.onclick=()=>{ if(lastImageUrl){ editPrompt(lastImageUrl); } else { toast('请先生成或上传一张图片'); } } }
-    else { d.onclick=()=>chipText(t); }
-    rs.appendChild(d);
-  });
   const qr=$('quickRow');qr.innerHTML='';
   QUICK.forEach(q=>{
     const b=document.createElement('button');b.className='qbtn';b.textContent=q.label;
