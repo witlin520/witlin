@@ -107,6 +107,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .medbtn{font-size:12px;padding:5px 11px;border:1px solid var(--line);border-radius:12px;background:#f5f5f7;color:#333;cursor:pointer;text-decoration:none;display:inline-block;line-height:1.3}
 .medbtn.delb{color:#e33}
 .medbtn.editb{background:var(--accent);color:#fff;border-color:var(--accent)}
+.retry-row{margin-top:10px;text-align:center}
+.retryb{background:var(--accent);color:#fff;border-color:var(--accent);font-size:13px;padding:7px 16px;border-radius:14px}
+.retryb:active{opacity:.8}
 /* 顶部左侧 会话区 */
 .topbar .left{display:flex;align-items:center;gap:2px}
 #newBtn{display:none;align-items:center;padding:6px;color:var(--accent)}
@@ -627,6 +630,7 @@ function msgEl(id){ return document.querySelector('#chat .msg[data-mid="'+id+'"]
 function findSessionOf(m){ return sessions.find(s=>s.messages.indexOf(m)>=0)||null; }
 function fillMsg(m, el, opts){
   m.loading=false;
+  delete m._retryBody;   // 成功则清除失败重试缓存
   if(opts.text!==undefined) m.text=opts.text;
   m.display=opts.display||'';
   m.media=opts.media||[];
@@ -646,6 +650,23 @@ function failMsg(lm, msg){
   if(target && target.parentNode) target.querySelector('.bubble').innerHTML='<div class="text">⚠️ '+esc(msg)+'</div>';
   const s=findSessionOf(m)||curSession(); if(s){ autoTitle(s); saveSess(); }
   updateNewBtn();
+}
+// 失败并带"点击重试"按钮: 复用原请求 body 重新提交
+function failMsgRetry(lm, msg, body){
+  const m=lm.m; m.loading=false; m.text=''; m.display=msg; m.media=m.media||[]; m._retryBody=body;
+  const target=msgEl(m.id)||lm.el;
+  if(target && target.parentNode){
+    target.querySelector('.bubble').innerHTML='<div class="text">⚠️ '+esc(msg)+'</div>'
+      +'<div class="retry-row"><button class="medbtn retryb" type="button" onclick="retryMsg('+m.id+')">🔄 点击重试</button></div>';
+  }
+  const s=findSessionOf(m)||curSession(); if(s){ autoTitle(s); saveSess(); }
+  updateNewBtn();
+}
+function findMsg(id){ for(const s of sessions){ const m=s.messages.find(x=>x.id===id); if(m) return {s,m}; } return null; }
+function retryMsg(id){
+  const f=findMsg(id); if(!f || !f.m._retryBody){ toast('没有可重试的内容'); return; }
+  const lm={s:f.s, m:f.m, el:msgEl(id)};
+  doSend(lm, f.m._retryBody);
 }
 
 // ---------- 欢迎态（豆包首页） ----------
@@ -862,6 +883,14 @@ async function send(){
     }catch(e){ /* 意图识别失败不影响主流程 */ }
   }
   if(intentObj) body._intent=intentObj;
+  await doSend(lm, body);
+}
+// 发送/生图请求执行入口: 可被失败重试复用; 失败弹"点击重试"按钮
+async function doSend(lm, body){
+  sending=true;if($('send'))$('send').disabled=true;
+  if(lm.m) lm.m.loading=true;
+  const tEl=msgEl(lm.m.id)||lm.el;
+  if(tEl && tEl.querySelector) tEl.querySelector('.bubble').innerHTML='<span class="spinner"></span> 思考中…';
   const ac=new AbortController();const to=setTimeout(()=>ac.abort(),300000); // 生成多图/agentic/联网搜索耗时长, 对齐后端 5 分钟, 避免"想久一点就失败"
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
@@ -881,7 +910,7 @@ async function send(){
     clearRef();
     const ss=curSession();
     if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
-  }catch(e){ failMsg(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':e.message); }
+  }catch(e){ failMsgRetry(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':((e&&e.message)||String(e)), body); }
   finally{clearTimeout(to)}
   sending=false;if($('send'))$('send').disabled=false;scrollBottom();
 }
