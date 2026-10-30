@@ -895,6 +895,7 @@ async function doSend(lm, body){
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
     const j=await r.json();
+    if(!j.ok) throw new Error((j.error&&(j.error.message||j.error.detail))||'请求失败，请重试');   // 后端报错不再空泡泡
     let media=[];
     const prefix=j.searched?'<div style="font-size:12px;color:var(--accent);margin-bottom:6px">🌐 已联网搜索</div>':'';
     if(j.task_id){
