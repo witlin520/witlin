@@ -84,6 +84,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #gen .video-opts{margin:8px 0;font-size:14px}
 #gen .video-opts .st{border:1px solid #d9d9dc;border-radius:8px;background:#fff;padding:5px 14px;margin:0 5px 0 0;cursor:pointer}
 #gen .video-opts .st.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+#gen .rtb{display:inline-block;border:1px solid #d9d9dc;border-radius:8px;background:#fff;padding:5px 14px;margin:0 5px 0 0;cursor:pointer;font-size:14px}
+#gen .rtb.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 #gen .video-opts .refbtn{background:#f5f5f7;border:1px solid #d9d9dc;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px}
 #gen .video-opts #refThumbs{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
 #gen .video-opts #refThumbs .rt{position:relative}
@@ -167,6 +169,8 @@ html.dark #gen .seg button{border:1px solid #3a3a3c;background:#2c2c2e;color:#e5
 html.dark #gen textarea{border:1px solid #3a3a3c;background:#1c1c1e;color:#f2f2f7}
 html.dark #gen .dur button{background:#2c2c2e;color:#e5e5ea}
 html.dark #gen .video-opts .st{border:1px solid #3a3a3c;background:#1c1c1e;color:#e5e5ea}
+html.dark #gen .rtb{border:1px solid #3a3a3c;background:#1c1c1e;color:#e5e5ea}
+html.dark #gen .rtb.on{background:var(--accent);color:#fff}
 html.dark #gen .video-opts .refbtn{background:#2c2c2e;border:1px solid #3a3a3c;color:#e5e5ea}
 html.dark #gen .video-opts #refThumbs .rt img,html.dark #gen .video-opts #refThumbs .rt video,html.dark #gen .video-opts #clipThumbs .rt video{border-color:#3a3a3c}
 html.dark #gen .btns button.gray{background:#2c2c2e;color:#e5e5ea}
@@ -228,6 +232,13 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
     <button style="cursor:pointer;border:none;background:#eee;padding:2px 8px;border-radius:6px" onclick="dur(-1)">−</button>
     <span id="durVal">5</span> 秒
     <button style="cursor:pointer;border:none;background:#eee;padding:2px 8px;border-radius:6px" onclick="dur(1)">＋</button>
+  </div>
+  <div class="dur" id="ratioWrap" style="display:none">比例
+    <button class="rtb on" onclick="setRatio('1:1')">1:1</button>
+    <button class="rtb" onclick="setRatio('3:4')">3:4</button>
+    <button class="rtb" onclick="setRatio('4:3')">4:3</button>
+    <button class="rtb" onclick="setRatio('9:16')">9:16</button>
+    <button class="rtb" onclick="setRatio('16:9')">16:9</button>
   </div>
   <div class="video-opts" id="vidOpts" style="display:none">
     <div style="margin-bottom:8px">步数
@@ -345,7 +356,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <script>
 const API=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname))?location.origin:'https://soul0516.duckdns.org:46893';
-let mode='image';let durSec=5;
+let mode='image';let durSec=5;let imgRatio='1:1';
 let videoSteps=16;let genRefs=[];let refAr=[];let genAudio=null;let genAudioName='';let genClips=[];   // 生视频: 步数 + 参考图 + 音频 + 参考视频
 let pendingImages=[];
 let refImg=null;   // 引用的图片: base64 或 http url
@@ -1121,9 +1132,11 @@ function delImg(i){pendingImages.splice(i,1);renderPreview()}
 
 // ---------- 生成 ----------
 function toggleGen(){const g=$('gen'),m=$('mask');const on=g.style.display==='block';g.style.display=on?'none':'block';m.style.display=on?'none':'block'}
-function setMode(m){mode=m;$('segImg').className=m==='image'?'on':'';$('segVid').className=m==='video'?'on':'';$('durWrap').style.display=m==='video'?'flex':'none';$('vidOpts').style.display=m==='video'?'block':'none'}
+function setMode(m){mode=m;$('segImg').className=m==='image'?'on':'';$('segVid').className=m==='video'?'on':'';$('durWrap').style.display=m==='video'?'flex':'none';$('vidOpts').style.display=m==='video'?'block':'none';$('ratioWrap').style.display=m==='image'?'flex':'none'}
 function dur(d){durSec=Math.max(2,Math.min(8,durSec+d));$('durVal').textContent=durSec}
 function setSteps(s){videoSteps=s;document.querySelectorAll('#gen .st').forEach(x=>x.classList.toggle('on',x.textContent===(s+'步')))}
+function setRatio(r){imgRatio=r;document.querySelectorAll('#gen .rtb').forEach(x=>x.classList.toggle('on',x.textContent===r))}
+function ratioWH(r){const M={'1:1':[1024,1024],'3:4':[768,1024],'4:3':[1024,768],'9:16':[768,1344],'16:9':[1344,768]};const a=M[r]||M['1:1'];return {w:a[0],h:a[1]}}
 function refClick(){$('reffile').click()}
 function addRefFiles(files){
   [...files].forEach(f=>{
@@ -1246,7 +1259,8 @@ async function doGen(){
   const lm=loadingMsg('');
   try{
     if(mode==='image'){
-      const r=await apiFetch(API+'/api/image',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt})});
+      const imgWH=ratioWH(imgRatio);
+      const r=await apiFetch(API+'/api/image',{method:'POST',headers:authHeaders(),body:JSON.stringify({prompt,width:imgWH.w,height:imgWH.h})});
       const j=await r.json();if(!j.ok||!j.image_url)throw new Error(j.error?j.error.message:'生图失败');
       lastImageUrl=j.image_url;
       fillMsg(lm.m, lm.el, {display:'已生成', media:[{type:'image',url:j.image_url}]});
