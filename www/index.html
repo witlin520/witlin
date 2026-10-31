@@ -146,6 +146,36 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #login input:focus{border-color:var(--accent)}
 #login button{width:100%;background:var(--accent);color:#fff;border:none;border-radius:12px;padding:13px;font-size:16px;cursor:pointer}
 #login .err{color:#e33;font-size:13px;text-align:center;margin-bottom:10px;min-height:16px}
+/* ---------- 暗黑主题 ---------- */
+html.dark{--bg:#0d0d0f;--card:#1c1c1e;--txt:#f2f2f7;--sub:#8e8e93;--line:#2c2c2e}
+html.dark .top-icon,html.dark .top-actions .top-icon{color:#e5e5ea}
+html.dark .hello{color:#f2f2f7}
+html.dark .wtab{background:#2c2c2e;color:#e5e5ea}
+html.dark .wtab.on{background:#1c1c1e;border-color:#3a3a3c;color:#f2f2f7}
+html.dark .rec-card{color:#e5e5ea}
+html.dark .rec-card:active,html.dark .qbtn:active,html.dark .sess-item:active{background:#2c2c2e}
+html.dark .qbtn{color:#e5e5ea}
+html.dark .msg.ai .bubble{background:#1c1c1e}
+html.dark #composer{background:#1c1c1e}
+html.dark #refbar button{background:#2c2c2e;color:#8e8e93}
+html.dark #row{background:#2c2c2e}
+html.dark #row input::placeholder,html.dark #gen textarea::placeholder,html.dark #login input::placeholder{color:#6d6d72}
+html.dark .icon-btn{color:#e5e5ea}
+html.dark #gen{background:#1c1c1e}
+html.dark #gen .seg button{border:1px solid #3a3a3c;background:#2c2c2e;color:#e5e5ea}
+html.dark #gen textarea{border:1px solid #3a3a3c;background:#1c1c1e;color:#f2f2f7}
+html.dark #gen .dur button{background:#2c2c2e;color:#e5e5ea}
+html.dark #gen .video-opts .st{border:1px solid #3a3a3c;background:#1c1c1e;color:#e5e5ea}
+html.dark #gen .video-opts .refbtn{background:#2c2c2e;border:1px solid #3a3a3c;color:#e5e5ea}
+html.dark #gen .video-opts #refThumbs .rt img,html.dark #gen .video-opts #refThumbs .rt video,html.dark #gen .video-opts #clipThumbs .rt video{border-color:#3a3a3c}
+html.dark #gen .btns button.gray{background:#2c2c2e;color:#e5e5ea}
+html.dark .medbtn{background:#2c2c2e;color:#e5e5ea}
+html.dark #drawer{background:#1c1c1e}
+html.dark .sess-item.on{background:#1f2a44}
+html.dark .drawer-foot button{background:#2c2c2e;color:#e5e5ea}
+html.dark #sessMenu{background:#1c1c1e}
+html.dark #login .card{background:#1c1c1e}
+html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7}
 </style>
 </head>
 <body>
@@ -154,6 +184,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
   <div class="left">
     <button class="top-icon" title="会话" onclick="openDrawer()">☰</button>
     <button class="top-icon" id="newBtn" title="新建对话" onclick="newSession()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+  </div>
+  <div class="top-actions">
+    <button class="top-icon" id="themeBtn" title="切换主题" onclick="toggleTheme()">🌙</button>
   </div>
 </header>
 
@@ -363,6 +396,12 @@ function buildHist(){
 }
 
 function $(id){return document.getElementById(id)}
+function toggleTheme(){
+  const dark=document.documentElement.classList.toggle('dark');
+  try{ localStorage.setItem('oc_theme', dark?'dark':'light'); }catch(e){}
+  const b=$('themeBtn'); if(b){ b.textContent = dark?'☀️':'🌙'; }
+}
+(function(){ try{ const t=localStorage.getItem('oc_theme'); if(t==='dark') document.documentElement.classList.add('dark'); const b=$('themeBtn'); if(b) b.textContent = document.documentElement.classList.contains('dark')?'☀️':'🌙'; }catch(e){} })();
 function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2200)}
 function authHeaders(){return {'Content-Type':'application/json','Authorization':'Bearer '+sessionToken}}
 function clearAuth(){sessionToken=null;try{localStorage.removeItem('oc_session')}catch(e){};showLogin();toast('登录已过期，请重新登录')}
@@ -570,14 +609,15 @@ async function hydrateMedia(container){
   const els = Array.from(container.querySelectorAll('[data-mu]'));
   for(const el of els){
     const u = el.getAttribute('data-mu'); if(!u) continue;
-    const url = await mediaUrl(u);
+    // 视频走流式: 直接指向代理 URL(后端支持 Range 断点续传), 弱网时暂停缓冲/恢复续传, 而非整段下载失败
+    if(el.tagName==='VIDEO'){ el.src=mSrc(u); try{ el.load&&el.load(); }catch(e){} continue; }
+    const url = await mediaUrl(u);   // 图片走内存 blob 缓存(体积小, 复用友好)
     if(!url){ // 加载失败 -> 触发各自 onerror(视频重试/图片重试占位)
       if(el.getAttribute('data-mu')===u && el.onerror){ try{ el.onerror(); }catch(e){} }
       continue;
     }
     if(el.getAttribute('data-mu')!==u) continue;
     el.src = url;
-    if(el.tagName==='VIDEO'){ try{ el.load&&el.load(); }catch(e){} }
   }
 }
 function medRowHtml(arr){
@@ -652,7 +692,7 @@ function viewMedia(arr,idx){
   v.classList.add('on');
   const u=vList[vCur].url;
   if(vType==='image'){ im.style.display='block'; vd.style.display='none'; mediaUrl(u).then(x=>{ if(x) im.src=x; }); vzFit(); }
-  else { vd.style.display='block'; im.style.display='none'; vd.setAttribute('playsinline',''); vd.onerror=()=>videoRetry(vd); mediaUrl(u).then(x=>{ if(x){ vd.src=x; vd.play(); } }); }
+  else { vd.style.display='block'; im.style.display='none'; vd.setAttribute('playsinline',''); vd.setAttribute('preload','auto'); vd.onerror=()=>videoRetry(vd); vd.src=mSrc(u); try{ vd.load&&vd.load(); }catch(e){} (vd.play()).catch(function(){}); }
   $('vzoom').classList.toggle('on', vType==='image');
 }
 function vzClose(){ const v=$('viewer'); v.classList.remove('on'); const vd=$('vvid'); vd.pause(); vd.removeAttribute('src'); }
@@ -666,10 +706,9 @@ function videoRetry(el){
   if(n>=2){ el.setAttribute('data-broken','1'); const holder=document.createElement('div'); holder.className='medi-broken'; holder.innerHTML='<button class="medbtn" type="button">🎬 视频加载失败，点击重试</button>'; holder.querySelector('button').onclick=()=>{ el.setAttribute('data-retry','0'); el.removeAttribute('data-broken'); holder.remove(); videoRetry(el); }; el.parentNode.insertBefore(holder, el.nextSibling); return; }
   n++; el.setAttribute('data-retry',n);
   el.onerror=null;
-  mediaUrl(u).then(url=>{
-    if(url){ el.src=url; el.load&&el.load(); (el.play&&el.play()).catch(function(){}); }
-    else { el.onerror=()=>videoRetry(el); try{ el.onerror(); }catch(e){} }
-  }).catch(()=>{ el.onerror=()=>videoRetry(el); try{ el.onerror(); }catch(e){} });
+  // 流式重试: 重建代理 URL(打破锁屏后失效连接), 走后端 Range 断点续传, 不再整段 fetch
+  try{ el.src=mSrc(u); el.load&&el.load(); (el.play&&el.play()).catch(function(){}); }
+  catch(e){ el.onerror=()=>videoRetry(el); try{ el.onerror(); }catch(e){} }
 }
 
 // 切回前台时, 重载所有"正在播放"或"加载失败"的视频 (WKWebView 锁屏挂起会掐断媒体连接)
