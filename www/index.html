@@ -159,6 +159,7 @@ html.dark .msg.ai .bubble{background:#1c1c1e}
 html.dark #composer{background:#1c1c1e}
 html.dark #refbar button{background:#2c2c2e;color:#8e8e93}
 html.dark #row{background:#2c2c2e}
+html.dark #row input[type=text]{color:#f2f2f7}
 html.dark #row input::placeholder,html.dark #gen textarea::placeholder,html.dark #login input::placeholder{color:#6d6d72}
 html.dark .icon-btn{color:#e5e5ea}
 html.dark #gen{background:#1c1c1e}
@@ -1015,21 +1016,9 @@ async function send(){
   const lm=loadingMsg();
   let histArr=buildHist().slice(0,-1);   // 去掉刚写入的当前用户消息, 避免上下文重复
   const hasNewImgs=imgs.length>0;
-  // 本地认知：判断是否新话题，决定带多少历史（长期记忆仍由压缩摘要兜底）
+  // 本地认知：判断是否新话题… 这里不再用本地语义模型(transformers/cog)阻塞主线程，避免"点发送卡一下"。仅新传图时压缩到最近一轮，其余交给后端构建历史+摘要兜底。
   try{
-    let isNew=false;
-    if(hasNewImgs){
-      isNew=true;   // 新上传图片=新视觉查询，不拖旧文字话题（图自带上下文，摘要兜底长期记忆）
-    }else if(window.cog&&window.cog.isReady()&&txt&&txt.length>4&&histArr.length){
-      const prev=histArr.slice(-2).map(h=>h.content);   // 只比最近2条，避免卡顿
-      const r=await Promise.race([
-        window.cog.simHist(txt,prev),
-        new Promise(res=>setTimeout(()=>res({best:1,bestIdx:-1,timeout:true}),400))   // 400ms 算不完就直接发
-      ]);
-      isNew=r.best<0.38;
-      console.log('[cog] sim',r.timeout?'timeout':r.best.toFixed(3),isNew?'新话题-只带最近一轮':'延续-正常窗口');
-    }
-    if(isNew) histArr=histArr.slice(-2);
+    if(hasNewImgs) histArr=histArr.slice(-2);   // 新上传图片=新视觉查询，只带最近一轮
   }catch(e){}
   const body={message:txt, history:histArr};
   // 按需自动定位: 仅当消息与位置相关(查天气/附近等)才定位并带上, 其余不定位
