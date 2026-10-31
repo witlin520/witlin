@@ -963,12 +963,16 @@ function showSession(id){
   if(s && s.messages.length){
     showChat();
     s.messages.forEach(m=>{
-      if(m.loading){ const el=addMsg('ai','',[],[],m.id); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
+      const imgs=Array.isArray(m.images)?m.images:[];
+      const meds=Array.isArray(m.media)?m.media:[];
+      const disp=String(m.display||m.text||'');
+      // 只为"真正待生成"(无文本且无媒体)的消息显示转圈; 已完成/带内容的消息即使 loading 标记异常也按内容渲染, 避免图片突然变"思考中"
+      const hasContent = !!disp.trim() || meds.length>0;
+      if(m.loading && !hasContent){ const el=addMsg('ai','',[],[],m.id); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
       else {
-        const imgs=Array.isArray(m.images)?m.images:[];
-        let disp=(m.display||m.text);
-        if(m.role==='user'&&m.hasImgs&&!imgs.length&&!disp) disp='📷 [图片]';
-        addMsg(m.role, disp, imgs, m.media||[], m.id);
+        let d=disp;
+        if(m.role==='user'&&m.hasImgs&&!imgs.length&&!d.trim()) d='📷 [图片]';
+        addMsg(m.role, d, imgs, meds, m.id);
       }
     });
     // 恢复最近一张图, 便于后续改图上下文
@@ -1060,15 +1064,22 @@ async function send(){
     if(loc) body.location = loc;
   }
   const s=curSession(); if(s && s.summary) body._compressContext=s.summary;
+  // 意图先算(前端规则): hasImage 表示本会话内有图可用(含上一张), 用于擦除/改图等规则识别
+  let intentObj = ruleIntent(txt, !!(imgs.length||lastImageUrl||refImg));
   let chatImgs = imgs.map(b=>({data:b,mime:'image/jpeg'}));
   if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:'image/jpeg'}); }  // 引用的图片作为改图对象
-  if(chatImgs.length===0 && lastImageUrl){ chatImgs=[{url:lastImageUrl}]; }   // 没传新图时带上上张图做上下文
+  // 是否回带上上一张图: 仅当本次确实与图相关(改/擦/换/生成/图问答)才注入;
+  // 纯文本问答/联网搜索(例: 生成一张图后再问"最新电影")不注入, 避免把普通问题拖成慢速视觉任务、模型误判去生图
+  const imgRel = !!lastImageUrl && (
+    (intentObj && /edit|erase|image|styl/.test(intentObj.intent||''))
+    || /改|换|擦|去掉|移除|染|删掉|变成|变装|加字|加文字|参考.*(图|这张)|根据.*(图|这张)|刚才那张|上一张|这张图|这个图|那张图|那个图|图里|图上有|图中有|图里的|画面里|把(它|这个|那)|将(它|这个|那)|(帮我|请帮我).(改|修|换|去|擦)/.test(txt)
+  );
+  if(chatImgs.length===0 && imgRel){ chatImgs=[{url:lastImageUrl}]; }   // 图相关才带上上一张图做上下文
   if(chatImgs.length)body.images=chatImgs;
-  // 意图理解(混合): 前端规则先抓明确意图, 抓不住且涉及图/画/改/换等再调后端一次识别
-  let intentObj = ruleIntent(txt, !!(chatImgs.length||lastImageUrl));
-  if(!intentObj && (chatImgs.length>0 || !!lastImageUrl || /图|画|改|换|去|染|生成|视频|衣|发|水印|手表|耳机/.test(txt))){
+  // 抓不住且涉及图/画/改/换等再调后端一次识别
+  if(!intentObj && (chatImgs.length>0 || imgRel || /图|画|改|换|去|染|生成|视频|衣|发|水印|手表|耳机/.test(txt))){
     try{
-      const ir=await apiFetch(API+'/api/intent',{method:'POST',headers:authHeaders(),body:JSON.stringify({message:txt, has_image:!!(chatImgs.length>0||lastImageUrl)})});
+      const ir=await apiFetch(API+'/api/intent',{method:'POST',headers:authHeaders(),body:JSON.stringify({message:txt, has_image:!!(chatImgs.length>0||imgRel)})});
       const ij=await ir.json(); if(ij&&ij.ok&&ij.intent) intentObj=ij.intent;
     }catch(e){ /* 意图识别失败不影响主流程 */ }
   }
