@@ -863,6 +863,28 @@ function showWel(){ $('welcome').style.display='block'; $('chat').style.display=
 function showChat(){ $('welcome').style.display='none'; $('chat').style.display='block'; updateNewBtn(); }
 function focusInput(){ const i=$('input'); i.focus(); }
 function chipText(t){ $('input').value=t; send(); }
+// 前端本地"是否需联网"判断(L0): 返回 'yes'/'no'/'null'
+// 与后端 needWebSearch 判定对齐, 但零 LLM 延迟。
+// 原则: 明确实时/最新/价格/需验证 -> 'yes'; 明确常识/代码/创意/闲聊/翻译 -> 'no';
+//       其余(含"什么/怎么/为什么/多少"但无明确实时词) -> null, 交后端 LLM 兜底, 避免本地误判漏搜。
+function localSearchHint(msg){
+  msg=(msg||'').trim(); if(!msg) return null;
+  // 强 "需搜" 信号: 实时/动态/最新/价格/权威/需验证
+  const yes = /天气|气温|温度|预报|降雨|下雨|下雪|台风|雾|晴|阴|风力|气温|新闻|快讯|汇率|美元|日元|欧元|英镑|港元|澳元|加元|股价|涨停|跌停|涨了|跌了|基金|赛果|比分|排片|航班|车次|油价|黄金|金价|股票|股市|大盘|上证|深证|A股|港股|美股|最新|最近|近日|发布|上市|新规|政策|法规|分数线|中高考|录取|报价|多少钱|价格|销量|口碑|评分|测评|参数|配置|评测|实测|哪家更好|哪个更|值不值得|真的有吗|怎么回事|区别|对比|哪个好|排名|榜单|最新开源|github|hugging|huggingface|api|报错|error|bug|开源模型|招聘|投标|招标|上市|中签/i.test(msg);
+  if(yes) return 'yes';
+  // 明确 "不用搜" 且自包含(无需外部信息): 代码/数学/翻译/纯创作
+  if(/^(用|写|如何|怎么).*(python|javascript|js|java|go|rust|c\+\+|html|css|代码|函数|算法|正则|sql|脚本|程序|回文|排序|爬虫|斐波那契|递归|链表|二叉树|接口|对象|类)/i.test(msg)) return 'no'; // 代码题
+  if(/^\s*[\d\s+\-*/().^=]+\??\s*$/i.test(msg) || /^(算|求|解|1\+|2\+|3\+)[\d\s+\-*/()=]*=?/i.test(msg)) return 'no'; // 纯数学
+  if(/翻译|帮我翻译|把.*(翻|译)成|用英语说|用日语说|用粤语说/i.test(msg)) return 'no'; // 翻译
+  if(/^(写|创作|写一|编|帮我写|帮我(写|做|生成|画)).*(诗|歌|散文|故事|文案|文章|祝福|情书|朋友圈|标题|口号|致辞|报告|感谢信)/i.test(msg)) return 'no'; // 纯创作
+  if(/^(你好|hi|hello|您好|早上好|晚上好|晚安|谢谢|感谢|再见|哈哈|哈哈|嗯|哦|好|行|厉害|太棒|你叫|你是谁|你是谁呀|在吗|拜拜)/i.test(msg)) return 'no'; // 问候/闲聊
+  // 一般知识/概念解释: 含疑问词时拿不准 -> 交后端兜底(避免误判漏搜); 不含疑问词且确定是"解释/介绍"才 no
+  if(/^(什么是|解释一下|解释|介绍下|介绍一下|讲讲|说说|描述)/i.test(msg)){
+    if(!/(什么|怎么|为什么|哪|多少|区别|对比|最新|最近|今天|现在|价格|多少钱|涨|跌|新闻)/i.test(msg)) return 'no';
+    return null;
+  }
+  return null;
+}
 // 前端规则意图识别(快, 零延迟): 命中就返回,intent 可选 chat/image/video/edit/erase/web/location
 function ruleIntent(msg, hasImg){
   msg=msg||'';
@@ -1040,6 +1062,9 @@ async function send(){
     }catch(e){ /* 意图识别失败不影响主流程 */ }
   }
   if(intentObj) body._intent=intentObj;
+  // 本地联网判断(L0): 明确 web 意图或命中实时词 -> 直接标记要搜; 否则用本地规则判断, 命中即传给后端跳过 LLM 判断(更快)
+  if(intentObj && intentObj.intent==='web'){ body._searchHint='yes'; }
+  else { const _sh=localSearchHint(txt); if(_sh) body._searchHint=_sh; }
   await doSend(lm, body);
 }
 // 发送/生图请求执行入口: 可被失败重试复用; 失败弹"点击重试"按钮
