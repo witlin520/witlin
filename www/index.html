@@ -599,43 +599,81 @@ async function saveMedia(url){
   }catch(e){ toast('保存失败'); }
 }
 // ---------- 媒体内存缓存(blob): 切会话/切后台不再重新拉取, 网络差也能显示 ----------
-const MEDIA_CACHE = new Map();   // url -> blobObjectUrl
+const MEDIA_CACHE = new Map();   // url -> blobObjectUrl (内存缓存, 运行期内命中)
+const MEDIA_TASKS = new Map();   // url -> 在途下载 Promise (防止同一张图重复下载)
+const MEDIA_MAX   = 300;         // 内存缓存上限: 超过则 LRU 淘汰最旧
+function mediaCacheSet(u,bu){
+  if(MEDIA_CACHE.size>=MEDIA_MAX){ const k=MEDIA_CACHE.keys().next().value; clearMediaCache(k); }
+  MEDIA_CACHE.set(u,bu);
+}
+// ---- 磁盘持久缓存 (IndexedDB 存 Blob): App 重启后图片秒开, 不再重复下载 ----
+let _idb=null;
+function idb(){ return _idb ? Promise.resolve(_idb) : new Promise((res)=>{ const r=indexedDB.open('oc_media',1); r.onupgradeneeded=(e)=>{ const db=e.target.result; if(!db.objectStoreNames.contains('imgs')) db.createObjectStore('imgs'); }; r.onsuccess=(e)=>{ _idb=e.target.result; res(_idb); }; r.onerror=()=>res(null); }); }
+async function idbGet(k){ try{ const db=await idb(); if(!db) return null; return await new Promise((res)=>{ const tx=db.transaction('imgs','readonly').objectStore('imgs').get(k); tx.onsuccess=()=>res(tx.result||null); tx.onerror=()=>res(null); }); }catch(e){ return null; } }
+async function idbSet(k,v){ try{ const db=await idb(); if(!db) return false; return await new Promise((res)=>{ const tx=db.transaction('imgs','readwrite').objectStore('imgs').put(v,k); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false); }); }catch(e){ return false; } }
+async function idbDel(k){ try{ const db=await idb(); if(!db) return; await new Promise((res)=>{ const tx=db.transaction('imgs','readwrite').objectStore('imgs').delete(k); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); }catch(e){} }
+async function idbClear(){ try{ const db=await idb(); if(!db) return; await new Promise((res)=>{ const tx=db.transaction('imgs','readwrite').objectStore('imgs').clear(); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); }catch(e){} }
+// ---- 全局受限并发下载器: 同时最多 MEDIA_CONC 个网络请求, 避免几十张图同时裸请求打爆 ----
+const MEDIA_CONC = 6;
+let _mRun=0; const _mQ=[];
+function mediaPool(fn){ return new Promise((res,rej)=>{ _mQ.push({fn,res,rej}); _mPump(); }); }
+function _mPump(){ while(_mRun<MEDIA_CONC && _mQ.length){ const j=_mQ.shift(); _mRun++; j.fn().then(j.res,j.rej).finally(()=>{ _mRun--; _mPump(); }); } }
+// 取图片 objectURL: 内存缓存 -> 磁盘缓存 -> 受限并发下载 + 异步写盘
 async function mediaUrl(u){
   if(!u) return null;
   if(String(u).startsWith('data:')) return u;
   if(MEDIA_CACHE.has(u)) return MEDIA_CACHE.get(u);
-  try{
-    const r = await fetch(API+'/api/media?url='+encodeURIComponent(u));
-    if(!r.ok) return null;
-    const b = await r.blob();
-    const bu = URL.createObjectURL(b);
-    MEDIA_CACHE.set(u, bu);
-    return bu;
-  }catch(e){ return null; }
+  if(MEDIA_TASKS.has(u)) return MEDIA_TASKS.get(u);   // 在途请求直接复用
+  const p=(async()=>{
+    // 磁盘命中: 直接转 objectURL, 不再走网络
+    const disk=await idbGet(u);
+    if(disk){ const bu=URL.createObjectURL(disk); mediaCacheSet(u,bu); return bu; }
+    return await mediaPool(async()=>{
+      const r=await fetch(API+'/api/media?url='+encodeURIComponent(u));
+      if(!r.ok) throw new Error('media http '+r.status);
+      const b=await r.blob();
+      idbSet(u,b).catch(()=>{});              // 异步写盘, 不阻塞本次加载
+      const bu=URL.createObjectURL(b);
+      mediaCacheSet(u,bu);
+      return bu;
+    });
+  })().catch(()=>null);
+  MEDIA_TASKS.set(u,p);
+  p.finally(()=>{ MEDIA_TASKS.delete(u); });   // 完成后移除任务记录
+  return p;
 }
 function clearMediaCache(u){
-  if(u && MEDIA_CACHE.has(u)){ try{ URL.revokeObjectURL(MEDIA_CACHE.get(u)); }catch(e){} MEDIA_CACHE.delete(u); }
+  if(!u) return;
+  if(MEDIA_CACHE.has(u)){ try{ URL.revokeObjectURL(MEDIA_CACHE.get(u)); }catch(e){} MEDIA_CACHE.delete(u); }
+  idbDel(u).catch(()=>{});   // 顺带清磁盘, 避免落盘垃圾
 }
 function clearAllMediaCache(){
   MEDIA_CACHE.forEach((bu)=>{ try{ URL.revokeObjectURL(bu); }catch(e){} });
   MEDIA_CACHE.clear();
+  MEDIA_TASKS.clear();
+  idbClear().catch(()=>{});
 }
 // 容器内所有 [data-mu] 元素异步设置 src(优先用缓存, 未缓存则拉取并缓存)
 async function hydrateMedia(container){
   if(!container || !container.querySelectorAll) return;
   const els = Array.from(container.querySelectorAll('[data-mu]'));
+  const imgs=[];
   for(const el of els){
     const u = el.getAttribute('data-mu'); if(!u) continue;
     // 视频走流式: 直接指向代理 URL(后端支持 Range 断点续传), 弱网时暂停缓冲/恢复续传, 而非整段下载失败
     if(el.tagName==='VIDEO'){ el.src=mSrc(u); try{ el.load&&el.load(); }catch(e){} continue; }
-    const url = await mediaUrl(u);   // 图片走内存 blob 缓存(体积小, 复用友好)
+    imgs.push(el);
+  }
+  // 图片并发拉取: 网络层由 mediaUrl 内部池限流(同时最多 MEDIA_CONC), 不会几十张同时裸请求
+  await Promise.all(imgs.map(async (el)=>{
+    const u = el.getAttribute('data-mu');
+    const url = await mediaUrl(u);
     if(!url){ // 加载失败 -> 触发各自 onerror(视频重试/图片重试占位)
       if(el.getAttribute('data-mu')===u && el.onerror){ try{ el.onerror(); }catch(e){} }
-      continue;
+      return;
     }
-    if(el.getAttribute('data-mu')!==u) continue;
-    el.src = url;
-  }
+    if(el.getAttribute('data-mu')===u) el.src = url;
+  }));
 }
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
