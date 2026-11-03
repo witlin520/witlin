@@ -423,6 +423,11 @@ async function apiFetch(url,opts={}){
     try{
       const r=await fetch(url,opts);
       if(r.status===401&&!url.includes('/api/login'))clearAuth();
+      else if(r.status>=200&&r.status<300){
+        // 滑动续期: 后端在令牌临近到期时回传新令牌, 前端静默更新本地, 保证长期保持登录
+        const nt=r.headers.get('X-Auth-Token');
+        if(nt){ sessionToken=nt; try{localStorage.setItem('oc_session',nt)}catch(e){} }
+      }
       return r;
     }catch(e){
       last=e;
