@@ -654,26 +654,25 @@ function clearAllMediaCache(){
   idbClear().catch(()=>{});
 }
 // 容器内所有 [data-mu] 元素异步设置 src(优先用缓存, 未缓存则拉取并缓存)
+// 图片懒加载: 进入视口(+200px 预载)才拉取显示, 长会话只加载可见区图片, 避免一次性几百张全部读盘/下载
+const _lazyIO = ('IntersectionObserver' in window) ? new IntersectionObserver((ents)=>{
+  for(const en of ents){ if(en.isIntersecting){ _lazyIO.unobserve(en.target); mediaImgLoad(en.target); } }
+}, {root:null, rootMargin:'200px 0px 200px 0px'}) : null;
+async function mediaImgLoad(el){
+  const u=el.getAttribute('data-mu'); if(!u) return;
+  const url=await mediaUrl(u);
+  if(!url){ if(el.getAttribute('data-mu')===u && el.onerror){ try{ el.onerror(); }catch(e){} } return; }
+  if(el.getAttribute('data-mu')===u) el.src=url;
+}
 async function hydrateMedia(container){
   if(!container || !container.querySelectorAll) return;
   const els = Array.from(container.querySelectorAll('[data-mu]'));
-  const imgs=[];
   for(const el of els){
     const u = el.getAttribute('data-mu'); if(!u) continue;
     // 视频走流式: 直接指向代理 URL(后端支持 Range 断点续传), 弱网时暂停缓冲/恢复续传, 而非整段下载失败
     if(el.tagName==='VIDEO'){ el.src=mSrc(u); try{ el.load&&el.load(); }catch(e){} continue; }
-    imgs.push(el);
+    if(_lazyIO){ _lazyIO.observe(el); } else { mediaImgLoad(el); }   // 支持 IO 则懒加载, 否则直载
   }
-  // 图片并发拉取: 网络层由 mediaUrl 内部池限流(同时最多 MEDIA_CONC), 不会几十张同时裸请求
-  await Promise.all(imgs.map(async (el)=>{
-    const u = el.getAttribute('data-mu');
-    const url = await mediaUrl(u);
-    if(!url){ // 加载失败 -> 触发各自 onerror(视频重试/图片重试占位)
-      if(el.getAttribute('data-mu')===u && el.onerror){ try{ el.onerror(); }catch(e){} }
-      return;
-    }
-    if(el.getAttribute('data-mu')===u) el.src = url;
-  }));
 }
 function medRowHtml(arr){
   if(!arr||!arr.length)return '';
@@ -805,14 +804,14 @@ function updateNewBtn(){
 }
 
 // ---------- 消息渲染 ----------
-function addMsg(role,text,images,media,id){
+function addMsg(role,text,images,media,id,nosb){   // nosb=true: 批量渲染时跳过逐条滚动(避免长会话插入一条滚一次引发卡顿)
   const c=$('chat'),d=document.createElement('div');d.className='msg '+role;
   if(id!=null) d.dataset.mid=id;
   let html=role==='ai'?'<div class="avatar">✨</div>':'';
   let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<div class="th"><img src="data:image/jpeg;base64,'+b+'" data-u="data:image/jpeg;base64,'+b+'" loading="lazy" onclick="viewThumb(this)"><button class="qref" type="button">引用</button></div>').join('')+'</div>':'';
   let med=mediaHtml(media);
   html+='<div class="bubble">'+thumbs+(text?'<div class="text">'+esc(text)+'</div>':'')+med+'</div>';
-  d.innerHTML=html;c.appendChild(d);scrollBottom();hydrateMedia(d);return d;
+  d.innerHTML=html;c.appendChild(d);if(!nosb)scrollBottom();hydrateMedia(d);return d;
 }
 // 提交一条用户消息并持久化
 function commitMsg(role, text, images, media){
@@ -1011,11 +1010,11 @@ function showSession(id){
       const disp=String(m.display||m.text||'');
       // 只为"真正待生成"(无文本且无媒体)的消息显示转圈; 已完成/带内容的消息即使 loading 标记异常也按内容渲染, 避免图片突然变"思考中"
       const hasContent = !!disp.trim() || meds.length>0;
-      if(m.loading && !hasContent){ const el=addMsg('ai','',[],[],m.id); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
+      if(m.loading && !hasContent){ const el=addMsg('ai','',[],[],m.id,true); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
       else {
         let d=disp;
         if(m.role==='user'&&m.hasImgs&&!imgs.length&&!d.trim()) d='📷 [图片]';
-        addMsg(m.role, d, imgs, meds, m.id);
+        addMsg(m.role, d, imgs, meds, m.id, true);   // 批量渲染: 不逐条滚动, 末尾统一滚一次
       }
     });
     // 恢复最近一张图, 便于后续改图上下文
