@@ -49,7 +49,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .msg.user .avatar{display:none}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
 .thumbs img{width:90px;height:90px;object-fit:cover;border-radius:10px}
-.text{padding:4px 0}
+.text{padding:4px 0;white-space:pre-wrap}
+.text h1,.text h2,.text h3,.text h4,.text h5,.text h6{margin:.7em 0 .35em;font-weight:800;line-height:1.3}
+.text h1{font-size:20px}.text h2{font-size:18px}.text h3{font-size:16px}.text h4,.text h5,.text h6{font-size:15px}
+.text ul,.text ol{margin:.4em 0;padding-left:1.4em}
+.text li{margin:.18em 0}
+.text code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.text pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-x:auto;margin:.5em 0}
+.text pre code{background:none;border:none;padding:0;font-size:13px;line-height:1.5}
+.text blockquote{margin:.5em 0;padding:4px 12px;border-left:3px solid var(--accent);color:var(--sub)}
+.text b,.text strong{font-weight:700}
+.text a{color:var(--accent);text-decoration:underline;word-break:break-all}
 .media{margin-top:6px}
 .media img{max-width:100%;border-radius:12px;display:block}
 .media video{max-width:100%;border-radius:12px;width:100%;background:#000}
@@ -472,6 +482,24 @@ async function apiFetch(url,opts={}){
   throw last;
 }
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+// 轻量 Markdown 渲染(先 esc 再转安全HTML, 标题/加粗/列表/代码/引用/链接)
+function md(s){
+  s=esc(String(s==null?'':s));
+  s=s.replace(/```([\s\S]*?)```/g,'<pre><code>$1</code></pre>');
+  s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+  s=s.replace(/^(#{1,6})[ \t]+(.+)$/gm,function(_,h,t){var n=h.length;return '<h'+n+'>'+t+'</h'+n+'>'});
+  s=s.replace(/^&gt;[ \t]*([^\n]+)$/gm,'<blockquote>$1</blockquote>');
+  s=s.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+  s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
+  s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s=s.replace(/^[ \t]*[-*+][ \t]+([^\n]+)$/gm,'<li>$1</li>');
+  s=s.replace(/^[ \t]*\d+[.)][ \t]+([^\n]+)$/gm,'<li>$1</li>');
+  s=s.replace(/(?:[ \t]*<li>[\s\S]*?<\/li>[ \t]*\n?)+/g,function(blk){
+    var items=blk.match(/<li>[\s\S]*?<\/li>/g)||[];
+    return '<ul>'+items.join('')+'</ul>';
+  });
+  return s;
+}
 function scrollBottom(){const c=$('chat');c.scrollTop=c.scrollHeight}
 
 // ---------- 定位 + 语音 ----------
@@ -842,7 +870,7 @@ function addMsg(role,text,images,media,id,nosb){   // nosb=true: 批量渲染时
   let html=role==='ai'?'<div class="avatar">✨</div>':'';
   let thumbs=images&&images.length?'<div class="thumbs">'+images.map(b=>'<div class="th"><img src="data:image/jpeg;base64,'+b+'" data-u="data:image/jpeg;base64,'+b+'" loading="lazy" onclick="viewThumb(this)"><button class="qref" type="button">引用</button></div>').join('')+'</div>':'';
   let med=mediaHtml(media);
-  html+='<div class="bubble">'+thumbs+(text?'<div class="text">'+esc(text)+'</div>':'')+med+'</div>';
+  html+='<div class="bubble">'+thumbs+(text?'<div class="text">'+md(text)+'</div>':'')+med+'</div>';
   d.innerHTML=html;c.appendChild(d);if(!nosb)scrollBottom();hydrateMedia(d);return d;
 }
 // 提交一条用户消息并持久化
@@ -875,7 +903,7 @@ function fillMsg(m, el, opts){
   if(opts.text!==undefined) m.text=opts.text;
   m.display=opts.display||'';
   m.media=opts.media||[];
-  let h=(opts.prefix||'')+(opts.display?'<div class="text">'+esc(opts.display)+'</div>':'');
+  let h=(opts.prefix||'')+(opts.display?'<div class="text">'+md(opts.display)+'</div>':'');
   if(m.media.length) h+=mediaHtml(m.media);
   if(opts.extraHtml) h+=opts.extraHtml;
   // 切会话后 el 可能已脱离 DOM, 用 data-mid 重新定位当前节点; 找不到则只更新数据
@@ -1505,7 +1533,7 @@ async function doSearch(){
     const j=await r.json();if(!j.ok)throw new Error(j.error?j.error.message:'搜索失败');
     const parts=[];
     const txt=(j.answer||'').trim()||'（未找到相关内容）';
-    parts.push('<div class="text">'+esc(txt).replace(/\n/g,'<br>')+'</div>');
+    parts.push('<div class="text">'+md(txt)+'</div>');
     if(Array.isArray(j.sources)&&j.sources.length){
       parts.push('<div class="text" style="margin-top:10px;opacity:.65;font-size:12px;line-height:1.7">来源：<br>'+j.sources.map(s=>'• '+esc(s)).join('<br>')+'</div>');
     }
