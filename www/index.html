@@ -49,15 +49,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 .msg.user .avatar{display:none}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
 .thumbs img{width:90px;height:90px;object-fit:cover;border-radius:10px}
-.text{padding:4px 0;white-space:pre-wrap}
-.text h1,.text h2,.text h3,.text h4,.text h5,.text h6{margin:.7em 0 .35em;font-weight:800;line-height:1.3}
+.text{padding:2px 0}
+.text .p{margin:.3em 0}
+.text h1,.text h2,.text h3,.text h4,.text h5,.text h6{margin:.45em 0 .28em;font-weight:800;line-height:1.3}
 .text h1{font-size:20px}.text h2{font-size:18px}.text h3{font-size:16px}.text h4,.text h5,.text h6{font-size:15px}
-.text ul,.text ol{margin:.4em 0;padding-left:1.4em}
-.text li{margin:.18em 0}
-.text code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-.text pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-x:auto;margin:.5em 0}
+.text ul,.text ol{margin:.28em 0;padding-left:1.4em}
+.text li{margin:.07em 0}
+.text code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 4px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.text pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px;overflow-x:auto;margin:.35em 0}
 .text pre code{background:none;border:none;padding:0;font-size:13px;line-height:1.5}
-.text blockquote{margin:.5em 0;padding:4px 12px;border-left:3px solid var(--accent);color:var(--sub)}
+.text blockquote{margin:.35em 0;padding:4px 10px;border-left:3px solid var(--accent);color:var(--sub)}
 .text b,.text strong{font-weight:700}
 .text a{color:var(--accent);text-decoration:underline;word-break:break-all}
 .media{margin-top:6px}
@@ -488,21 +489,28 @@ function md(s){
   // 保护代码块(含换行), 避免行扫描/行内转换误伤
   var blocks=[];
   s=s.replace(/```([\s\S]*?)```/g,function(m,c){blocks.push(c);return '\u0000B'+(blocks.length-1)+'\u0000'});
-  // 逐行扫描: 连续无序/有序列表各自合并为 ul/ol, 保留序号
-  var lines=s.split('\n'), out=[], cur=null;
-  function flush(){ if(cur){ out.push(cur.type==='ul'?'<ul>':'<ol>'); out.push(cur.arr.join('')); out.push(cur.type==='ul'?'</ul>':'</ol>'); cur=null; } }
+  // 逐行扫描分块: 段落(<div class="p">, 段内单换行转<br>) / 标题 / 引用 / 有序·无序列表 / 空行分隔
+  var lines=s.split('\n'), out=[], cur=null, para=[];
+  function flushPara(){ if(para.length){ out.push('<div class="p">'+para.join('<br>')+'</div>'); para=[]; } }
+  function flushList(){ if(cur){ out.push(cur.type==='ul'?'<ul>':'<ol>'); out.push(cur.arr.join('')); out.push(cur.type==='ul'?'</ul>':'</ol>'); cur=null; } }
+  function flushAll(){ flushPara(); flushList(); }
   for(var i=0;i<lines.length;i++){
     var ln=lines[i], um=ln.match(/^[ \t]*[-*+][ \t]+(.*)$/), om=ln.match(/^[ \t]*\d+[.)][ \t]+(.*)$/);
-    if(um){ if(!cur||cur.type!=='ul'){flush();cur={type:'ul',arr:[]};} cur.arr.push('<li>'+um[1]+'</li>'); }
-    else if(om){ if(!cur||cur.type!=='ol'){flush();cur={type:'ol',arr:[]};} cur.arr.push('<li>'+om[1]+'</li>'); }
-    else { flush(); out.push(ln); }
+    var hm=ln.match(/^(#{1,6})[ \t]+(.*)$/), qm=ln.match(/^&gt;[ \t]*(.*)$/);
+    if(um||om){
+      flushPara();
+      if(um){ if(!cur||cur.type!=='ul'){flushList();cur={type:'ul',arr:[]};} cur.arr.push('<li>'+um[1]+'</li>'); }
+      else { if(!cur||cur.type!=='ol'){flushList();cur={type:'ol',arr:[]};} cur.arr.push('<li>'+om[1]+'</li>'); }
+    } else if(hm){ flushAll(); out.push('<h'+hm[1].length+'>'+hm[2]+'</h'+hm[1].length+'>'); }
+    else if(qm){ flushAll(); out.push('<blockquote>'+qm[1]+'</blockquote>'); }
+    else if(/^\u0000B\d+\u0000$/.test(ln)){ flushAll(); out.push(ln); }   // 代码块占位符: 独立成块
+    else if(!ln.trim()){ flushAll(); }   // 空行: 结束当前段落/列表
+    else { para.push(ln); }
   }
-  flush();
+  flushAll();
   s=out.join('\n');
-  // 行内/行级转换(代码块仍是占位符, 不受影响)
+  // 行内转换(仅剩文本与标题/列表/引用内部, 代码块占位符不受影响)
   s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
-  s=s.replace(/^(#{1,6})[ \t]+(.+)$/gm,function(_,h,t){var n=h.length;return '<h'+n+'>'+t+'</h'+n+'>'});
-  s=s.replace(/^&gt;[ \t]*([^\n]+)$/gm,'<blockquote>$1</blockquote>');
   s=s.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
   s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
   s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
