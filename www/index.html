@@ -97,6 +97,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #gen .btns button.gray{background:#eee;color:#333}
 .mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10}
 .toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.8);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;z-index:50;display:none}
+#healthBar{display:none;align-items:center;gap:6px;padding:8px 14px;background:#fff3e0;color:#7a4f00;font-size:12px;cursor:pointer;border-bottom:1px solid var(--line)}
+html.dark #healthBar{background:#3a2e12;color:#ffd591}
+#diag{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-radius:18px 18px 0 0;z-index:12;max-height:82dvh;flex-direction:column;box-sizing:border-box;padding:16px 16px calc(env(safe-area-inset-bottom)+12px)}
+#diag h3{margin:0 0 6px;font-size:16px;display:flex;align-items:center;justify-content:space-between}
+#diag .close{border:none;background:none;color:var(--accent);font-size:15px;cursor:pointer;padding:2px 8px}
+#diagBody{flex:1;overflow:auto;font-size:12px;color:var(--txt)}
+#diagBody .row{margin:8px 0;font-size:12px}
+#diagBody pre{margin:4px 0;padding:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;word-break:break-all;font-size:11px}
+#diag .foot{margin-top:10px;display:flex;gap:8px}
+#diag .foot button{flex:1;padding:11px;border:none;border-radius:12px;font-size:14px;cursor:pointer;background:var(--accent);color:#fff}
 .progress{font-size:12px;color:var(--sub);margin-top:4px}
 .editrow{margin-top:8px}
 .edit-btn{border:none;background:var(--accent);color:#fff;padding:6px 12px;border-radius:14px;font-size:13px;cursor:pointer}
@@ -192,6 +202,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
   </div>
   <div class="top-actions">
     <button class="top-icon" id="themeBtn" title="切换主题" onclick="toggleTheme()">🌙</button>
+    <button class="top-icon" id="diagBtn" title="诊断" onclick="openDiag()">🩺</button>
   </div>
 </header>
 
@@ -320,6 +331,15 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="healthBar" onclick="openDiag()" role="button" tabindex="0"></div>
+<div id="diag">
+  <h3>🩺 运行诊断 <button class="close" onclick="closeDiag()">关闭</button></h3>
+  <div id="diagBody"></div>
+  <div class="foot">
+    <button type="button" onclick="refreshDiag()">刷新</button>
+    <button type="button" onclick="copyDiag()">复制诊断</button>
+  </div>
+</div>
 
 <!-- 涂抹擦除 overlay -->
 <div id="eraseOv">
@@ -356,6 +376,17 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <script>
 const API=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname))?location.origin:'https://soul0516.duckdns.org:46893';
+
+// ---------- 诊断: 全局错误捕获/启动自检/诊断面板 (后端 /api/log /api/diag /api/logs) ----------
+function reportErr(tag,msg,stack,api){ try{ fetch(API+'/api/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag:tag,msg:msg||'',stack:(stack||'').slice(0,800),api:api||'',device:String(navigator.userAgent).slice(0,120)})}).catch(()=>{}); }catch(e){} }
+window.addEventListener('error',function(e){ reportErr('js', e.message, e.error&&e.error.stack, location.href); });
+window.addEventListener('unhandledrejection',function(e){ var r=e.reason; reportErr('promise', (r&&r.message)||String(r), (r&&r.stack)||'', location.href); });
+async function bootHealth(){ const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),4000); try{ await fetch(API+'/api/health',{signal:ac.signal}); }catch(e){ const hb=$('healthBar'); if(hb){ hb.style.display='flex'; hb.innerHTML='⚠️ 连不上服务 (API: '+esc(API)+')，点这里看诊断'; } reportErr('health','连不上服务',e&&e.message,API+'/api/health'); }finally{ clearTimeout(to); } }
+async function openDiag(){ const d=$('diag'); if(!d) return; d.style.display='flex'; refreshDiag(); }
+function closeDiag(){ const d=$('diag'); if(d) d.style.display='none'; }
+async function refreshDiag(){ const b=$('diagBody'); if(!b) return; b.innerHTML='<div class="spinner"></div> 正在读取…'; let diag=null, logs=[]; try{ const rd=await fetch(API+'/api/diag',{headers:authHeaders()}); diag=await rd.json(); }catch(e){} try{ const rl=await fetch(API+'/api/logs?n=30',{headers:authHeaders()}); const jl=await rl.json(); logs=jl.logs||[]; }catch(e){} let h='<div class="row"><b>API 地址:</b> <pre>'+esc(API)+'</pre></div>'; if(diag&&diag.ok){ h+='<div class="row"><b>后端状态:</b> <pre>'+esc(JSON.stringify({version:diag.version,uptime:diag.uptime,pid:diag.pid,node:diag.node,mem:diag.mem},null,2))+'</pre></div>'; } else { h+='<div class="row"><b>后端:</b> <pre>⚠️ 连不上（或需登录）</pre></div>'; } h+='<div class="row"><b>最近错误('+logs.length+'):</b><pre>'+esc(logs.slice(-30).join('\n')||'（无）')+'</pre></div>'; b.innerHTML=h; }
+function copyDiag(){ const b=$('diagBody'); if(!b) return; const txt=('【witlin 诊断】\n时间: '+new Date().toLocaleString()+'\nAPI: '+API+'\n'+b.innerText); try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){toast('已复制，直接发我即可')},function(){toast('复制失败')}); } else { const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('已复制'); } }catch(e){ toast('复制失败'); } }
+
 let mode='image';let durSec=5;let imgRatio='1:1';
 let videoSteps=16;let genRefs=[];let refAr=[];let genAudio=null;let genAudioName='';let genClips=[];   // 生视频: 步数 + 参考图 + 音频 + 参考视频
 let pendingImages=[];
@@ -433,6 +464,7 @@ async function apiFetch(url,opts={}){
       last=e;
       // 瞬时网络错误(断网/连接丢失/DNS)才自动重试; 被 signal abort(真超时) 不重试
       const isAbort=(opts&&opts.signal&&opts.signal.aborted)||(e&&e.name==='AbortError');
+      if(!isAbort) reportErr('net', String(url), e&&e.message, String(url));   // 上报瞬时网络错误(非超时)
       if(a<2&&!isAbort){ await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
       throw e;
     }
@@ -1504,6 +1536,7 @@ function initApp(){
 document.getElementById('reffile').addEventListener('change',e=>{addRefFiles(e.target.files);e.target.value=''});
 document.getElementById('audiofile').addEventListener('change',e=>{if(e.target.files[0])addAudioFile(e.target.files[0]);e.target.value=''});
 document.getElementById('clipfile').addEventListener('change',e=>{addClipFiles(e.target.files);e.target.value=''});
+bootHealth();   // 启动自检: 连不上后端时显示诊断条, 不再盲目转圈
 if(sessionToken){hideLogin();initApp()}else{showLogin()}
 </script>
 <script type="module" src="./cognition.js"></script>
