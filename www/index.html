@@ -202,7 +202,6 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
   </div>
   <div class="top-actions">
     <button class="top-icon" id="themeBtn" title="切换主题" onclick="toggleTheme()">🌙</button>
-    <button class="top-icon" id="diagBtn" title="诊断" onclick="openDiag()">🩺</button>
   </div>
 </header>
 
@@ -280,6 +279,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
   <div id="sessionList"></div>
   <div class="drawer-foot">
     <button class="danger" onclick="clearAllDialogs()">🗑 清空所有对话</button>
+    <button onclick="openDiag()">🩺 运行诊断</button>
     <button class="danger" onclick="setToken()">🔑 退出登录</button>
   </div>
 </aside>
