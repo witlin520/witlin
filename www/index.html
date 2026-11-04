@@ -485,19 +485,29 @@ function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 // 轻量 Markdown 渲染(先 esc 再转安全HTML, 标题/加粗/列表/代码/引用/链接)
 function md(s){
   s=esc(String(s==null?'':s));
-  s=s.replace(/```([\s\S]*?)```/g,'<pre><code>$1</code></pre>');
+  // 保护代码块(含换行), 避免行扫描/行内转换误伤
+  var blocks=[];
+  s=s.replace(/```([\s\S]*?)```/g,function(m,c){blocks.push(c);return '\u0000B'+(blocks.length-1)+'\u0000'});
+  // 逐行扫描: 连续无序/有序列表各自合并为 ul/ol, 保留序号
+  var lines=s.split('\n'), out=[], cur=null;
+  function flush(){ if(cur){ out.push(cur.type==='ul'?'<ul>':'<ol>'); out.push(cur.arr.join('')); out.push(cur.type==='ul'?'</ul>':'</ol>'); cur=null; } }
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i], um=ln.match(/^[ \t]*[-*+][ \t]+(.*)$/), om=ln.match(/^[ \t]*\d+[.)][ \t]+(.*)$/);
+    if(um){ if(!cur||cur.type!=='ul'){flush();cur={type:'ul',arr:[]};} cur.arr.push('<li>'+um[1]+'</li>'); }
+    else if(om){ if(!cur||cur.type!=='ol'){flush();cur={type:'ol',arr:[]};} cur.arr.push('<li>'+om[1]+'</li>'); }
+    else { flush(); out.push(ln); }
+  }
+  flush();
+  s=out.join('\n');
+  // 行内/行级转换(代码块仍是占位符, 不受影响)
   s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
   s=s.replace(/^(#{1,6})[ \t]+(.+)$/gm,function(_,h,t){var n=h.length;return '<h'+n+'>'+t+'</h'+n+'>'});
   s=s.replace(/^&gt;[ \t]*([^\n]+)$/gm,'<blockquote>$1</blockquote>');
   s=s.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
   s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
   s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-  s=s.replace(/^[ \t]*[-*+][ \t]+([^\n]+)$/gm,'<li>$1</li>');
-  s=s.replace(/^[ \t]*\d+[.)][ \t]+([^\n]+)$/gm,'<li>$1</li>');
-  s=s.replace(/(?:[ \t]*<li>[\s\S]*?<\/li>[ \t]*\n?)+/g,function(blk){
-    var items=blk.match(/<li>[\s\S]*?<\/li>/g)||[];
-    return '<ul>'+items.join('')+'</ul>';
-  });
+  // 最后恢复代码块(内容只经 esc, 不做 markdown 转换)
+  s=s.replace(/\u0000B(\d+)\u0000/g,function(_,i){return '<pre><code>'+blocks[+i]+'</code></pre>'});
   return s;
 }
 function scrollBottom(){const c=$('chat');c.scrollTop=c.scrollHeight}
