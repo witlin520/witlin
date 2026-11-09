@@ -465,7 +465,7 @@ function authHeaders(){return {'Content-Type':'application/json','Authorization'
 function clearAuth(){sessionToken=null;try{localStorage.removeItem('oc_session')}catch(e){};showLogin();toast('登录已过期，请重新登录')}
 async function apiFetch(url,opts={}){
   let last;
-  for(let a=0;a<3;a++){
+  for(let a=0;a<4;a++){
     try{
       const r=await fetch(url,opts);
       if(r.status===401&&!url.includes('/api/login'))clearAuth();
@@ -477,15 +477,25 @@ async function apiFetch(url,opts={}){
       return r;
     }catch(e){
       last=e;
-      // 瞬时网络错误(断网/连接丢失/DNS)才自动重试; 被 signal abort(真超时) 不重试
+      // 瞬时网络错误(断网/连接丢失/DNS/SSL 握手冷启动)才自动重试; 被 signal abort(真超时) 不重试
       const isAbort=(opts&&opts.signal&&opts.signal.aborted)||(e&&e.name==='AbortError');
       if(!isAbort) reportErr('net', String(url), e&&e.message, String(url));   // 上报瞬时网络错误(非超时)
-      if(a<2&&!isAbort){ await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
+      if(a<3&&!isAbort){ await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
       throw e;
     }
   }
   throw last;
 }
+// 启动预热: 提前与后端建立连接(DNS/SSL/TCP), 避免首次请求因冷启动而"连接失败"
+function warmUpBackend(){
+  try{
+    if(window._warmed) return; window._warmed=true;
+    const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),8000);
+    fetch(API+'/api/health',{signal:ctl.signal, keepalive:true, headers:{'Accept':'application/json'}})
+      .then(r=>r.json()).catch(()=>{}).finally(()=>clearTimeout(to));
+  }catch(e){}
+}
+warmUpBackend();
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 // 轻量 Markdown 渲染(先 esc 再转安全HTML, 标题/加粗/列表/代码/引用/链接)
 function md(s){
