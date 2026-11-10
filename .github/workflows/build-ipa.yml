@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-latest      # 当前稳定镜像(macos-14 已退役, macos-15 近期不稳)
+    runs-on: macos-15          # 已验证能构建本项目(macos-14 已退役)
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
