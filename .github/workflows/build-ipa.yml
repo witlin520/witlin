@@ -56,6 +56,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:0 string zh-Hans" ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:1 string en" ios/App/App/Info.plist
+          # 允许局域网 HTTP(自动探测 http://192.168.1.9:8090), 只放行本地网络, 不全局关 ATS
+          /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" ios/App/App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" ios/App/App/Info.plist
 
       - name: 构建 unsigned App
         run: |

@@ -390,13 +390,24 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 </div>
 
 <script>
-const API=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname))?location.origin:'https://soul0516.duckdns.org:46893';
+// API 基站: 局域网优先(快速直达), 公网域名兜底; 自动探测+缓存上次可用, 保证又快又稳
+const IS_WEB=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname));
+const API_CANDIDATES=IS_WEB?[location.origin]:['http://192.168.1.9:8090','https://soul0516.duckdns.org:46893'];
+let API=(function(){ try{ const c=localStorage.getItem('_apiBase'); if(c&&API_CANDIDATES.indexOf(c)>=0) return c; }catch(e){} return API_CANDIDATES[API_CANDIDATES.length-1]; })();
+async function _probeApi(c,tm){ try{ const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),tm); const r=await fetch(c+'/api/health',{signal:ac.signal,keepalive:true}); clearTimeout(to); return r.ok?c:null; }catch(e){ return null; } }
+async function pickApiBase(){ // 缓存基站优先(上次可用最稳), 再按候选顺序(局域网先)探测
+  const order=[]; try{ const c=localStorage.getItem('_apiBase'); if(c&&API_CANDIDATES.indexOf(c)>=0) order.push(c); }catch(e){}
+  for(const c of API_CANDIDATES){ if(order.indexOf(c)<0) order.push(c); }
+  for(const c of order){ const ok=await _probeApi(c,2500); if(ok){ API=c; try{ localStorage.setItem('_apiBase',c); }catch(e){} return c; } }
+  return API;
+}
+window._apiReady=0;
 
 // ---------- 诊断: 全局错误捕获/启动自检/诊断面板 (后端 /api/log /api/diag /api/logs) ----------
 function reportErr(tag,msg,stack,api){ try{ fetch(API+'/api/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag:tag,msg:msg||'',stack:(stack||'').slice(0,800),api:api||'',device:String(navigator.userAgent).slice(0,120)})}).catch(()=>{}); }catch(e){} }
 window.addEventListener('error',function(e){ reportErr('js', e.message, e.error&&e.error.stack, location.href); });
 window.addEventListener('unhandledrejection',function(e){ var r=e.reason; reportErr('promise', (r&&r.message)||String(r), (r&&r.stack)||'', location.href); });
-async function bootHealth(){ const maxTries=3; for(let i=0;i<maxTries;i++){ const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),10000); try{ await fetch(API+'/api/health',{signal:ac.signal,keepalive:true}); clearTimeout(to); return; }catch(e){ clearTimeout(to); reportErr('health','连不上服务',e&&e.message,API+'/api/health'); if(i<maxTries-1){ await new Promise(r=>setTimeout(r,2000)); continue; } const hb=$('healthBar'); if(hb){ hb.style.display='flex'; hb.innerHTML='⚠️ 连不上服务 (API: '+esc(API)+')，点这里看诊断'; } } } }
+async function bootHealth(){ const base=await pickApiBase().catch(()=>API); const maxTries=3; for(let i=0;i<maxTries;i++){ const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),10000); try{ await fetch(base+'/api/health',{signal:ac.signal,keepalive:true}); clearTimeout(to); return; }catch(e){ clearTimeout(to); reportErr('health','连不上服务',e&&e.message,base+'/api/health'); if(i<maxTries-1){ await new Promise(r=>setTimeout(r,2000)); continue; } const hb=$('healthBar'); if(hb){ hb.style.display='flex'; hb.innerHTML='⚠️ 连不上服务 (API: '+esc(API)+')，点这里看诊断'; } } } }
 async function openDiag(){ const d=$('diag'); if(!d) return; d.style.display='flex'; refreshDiag(); }
 function closeDiag(){ const d=$('diag'); if(d) d.style.display='none'; }
 async function refreshDiag(){ const b=$('diagBody'); if(!b) return; b.innerHTML='<div class="spinner"></div> 正在读取…'; let diag=null, logs=[]; try{ const rd=await fetch(API+'/api/diag',{headers:authHeaders()}); diag=await rd.json(); }catch(e){} try{ const rl=await fetch(API+'/api/logs?n=30',{headers:authHeaders()}); const jl=await rl.json(); logs=jl.logs||[]; }catch(e){} let h='<div class="row"><b>API 地址:</b> <pre>'+esc(API)+'</pre></div>'; if(diag&&diag.ok){ h+='<div class="row"><b>后端状态:</b> <pre>'+esc(JSON.stringify({version:diag.version,uptime:diag.uptime,pid:diag.pid,node:diag.node,mem:diag.mem},null,2))+'</pre></div>'; } else { h+='<div class="row"><b>后端:</b> <pre>⚠️ 连不上（或需登录）</pre></div>'; } h+='<div class="row"><b>最近错误('+logs.length+'):</b><pre>'+esc(logs.slice(-30).join('\n')||'（无）')+'</pre></div>'; b.innerHTML=h; }
@@ -480,19 +491,24 @@ async function apiFetch(url,opts={}){
       // 瞬时网络错误(断网/连接丢失/DNS/SSL 握手冷启动)才自动重试; 被 signal abort(真超时) 不重试
       const isAbort=(opts&&opts.signal&&opts.signal.aborted)||(e&&e.name==='AbortError');
       if(!isAbort) reportErr('net', String(url), e&&e.message, String(url));   // 上报瞬时网络错误(非超时)
-      if(a<3&&!isAbort){ await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
+      if(a<3&&!isAbort){ 
+        // 网络错误: 刷新基站(局域网/公网漂移时自动切换), 用新基站重建 URL 再重试
+        try{ const old=API; const nb=await pickApiBase(); if(nb!==old&&String(url).indexOf('http')===0){ const sp=String(url).indexOf('/',String(url).indexOf('//')+2); if(sp>0) url=API+String(url).substring(sp); } }catch(e2){}
+        await new Promise(r=>setTimeout(r,(a+1)*1500)); continue; }
       throw e;
     }
   }
   throw last;
 }
-// 启动预热: 提前与后端建立连接(DNS/SSL/TCP), 避免首次请求因冷启动而"连接失败"
+// 启动预热: 自动选定基站后提前建立连接(DNS/SSL/TCP), 避免首次请求因冷启动"连接失败"
 function warmUpBackend(){
   try{
     if(window._warmed) return; window._warmed=true;
-    const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),8000);
-    fetch(API+'/api/health',{signal:ctl.signal, keepalive:true, headers:{'Accept':'application/json'}})
-      .then(r=>r.json()).catch(()=>{}).finally(()=>clearTimeout(to));
+    pickApiBase().then(base=>{
+      const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),8000);
+      fetch(base+'/api/health',{signal:ctl.signal, keepalive:true, headers:{'Accept':'application/json'}})
+        .then(r=>r.json()).catch(()=>{}).finally(()=>clearTimeout(to));
+    }).catch(()=>{});
   }catch(e){}
 }
 warmUpBackend();
