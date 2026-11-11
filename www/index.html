@@ -602,7 +602,7 @@ function clearLoc(){ userLoc=null; saveLoc(); }
 // 是否需要按需定位的位置相关词 (查天气/附近等)
 function needLocation(msg){
   if(!msg) return false;
-  return /天气|气温|温度|降雨|下雨|晴|阴|台风|附近|周边|离我|最近|哪里|哪儿|哪里有|在哪|位置|定位|导航|路线|地图|店|馆|餐厅|咖啡馆|烧烤|医院|药房|药店|加油站|银行|超市|地铁|公交|派出所|公园|好玩|好吃|风景|景点/.test(msg);
+  return /天气|气温|温度|降雨|下雨|晴|阴|台风|油价|汽油|柴油|附近|周边|离我|我最近|离我最近|最近的|哪里|哪儿|哪里有|在哪|位置|定位|导航|路线|地图|店|馆|餐厅|咖啡馆|烧烤|医院|药房|药店|加油站|银行|超市|地铁|公交|派出所|公园|好玩|好吃|风景|景点/.test(msg);
 }
 function toggleSpeak(){
   speakOn=!speakOn; const b=$('speakBtn');
@@ -1656,8 +1656,14 @@ async function doSearch(){
   if(!q||!q.trim())return;
   showChat();
   const lm=loadingMsg('搜索中…');
+  // 带已缓存定位(油价/天气/价格类更贴近本地), 无缓存则不阻塞
+  const payload={query:q.trim()};
   try{
-    const r=await apiFetch(API+'/api/search',{method:'POST',headers:authHeaders(),body:JSON.stringify({query:q.trim()})});
+    if(userLoc && userLoc.label){ payload.location={label:userLoc.label, lat:userLoc.lat, lng:userLoc.lng}; }
+    else if(needLocation(q)){ const _loc=await locateMe(); if(_loc&&_loc.label) payload.location={label:_loc.label, lat:_loc.lat, lng:_loc.lng}; }
+  }catch(e){}
+  try{
+    const r=await apiFetch(API+'/api/search',{method:'POST',headers:authHeaders(),body:JSON.stringify(payload)});
     const j=await r.json();if(!j.ok)throw new Error(j.error?j.error.message:'搜索失败');
     const parts=[];
     const txt=(j.answer||'').trim()||'（未找到相关内容）';
