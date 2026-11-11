@@ -1255,6 +1255,17 @@ async function doSend(lm, body){
   const tEl=msgEl(lm.m.id)||lm.el;
   if(tEl && tEl.querySelector) tEl.querySelector('.bubble').innerHTML='<span class="spinner"></span> 思考中…';
   const ac=new AbortController();const to=setTimeout(()=>ac.abort(),300000); // 生成多图/agentic/联网搜索耗时长, 对齐后端 5 分钟, 避免"想久一点就失败"
+  // 纯文字对话→流式实时逐字输出; 图片/生图/视频/编辑→保持非流式(后台任务模式)
+  const _intent=(body&&body._intent&&body._intent.intent)||'';
+  const _genIntent=/image|video|edit|erase/.test(_intent);
+  const _noImg=!(body.images&&body.images.length);
+  const _genWord=/画|海报|视频|写真|换脸|水印|抠图|修图|改图|头像|壁纸|做张|来张/.test((body.message||''));
+  if(_noImg && !_genIntent && !_genWord){
+    try{ await streamSend(lm, body, ac); }
+    finally{ clearTimeout(to); }
+    sending=false;if($('send'))$('send').disabled=false;scrollBottom();
+    return;
+  }
   try{
     const r=await apiFetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify(body),signal:ac.signal});
     const j=await r.json();
@@ -1277,6 +1288,49 @@ async function doSend(lm, body){
   }catch(e){ failMsgRetry(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':((e&&e.message)||String(e)), body); }
   finally{clearTimeout(to)}
   sending=false;if($('send'))$('send').disabled=false;scrollBottom();
+}
+// 流式发送: SSE 逐字渲染(纯文字对话); 生图/视频走原非流式(后台任务)
+async function streamSend(lm, body, ac){
+  const tEl=msgEl(lm.m.id)||lm.el;
+  const bubble=tEl && tEl.querySelector ? tEl.querySelector('.bubble') : null;
+  if(bubble){ bubble.innerHTML=''; }
+  const textEl=document.createElement('div'); textEl.className='text';
+  if(bubble) bubble.appendChild(textEl);
+  let prefix=false, acc='';
+  try{
+    const res=await fetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify({...body, stream:true}),signal:ac.signal});
+    if(!res.ok || !res.body) throw new Error('HTTP '+res.status);
+    const reader=res.body.getReader(); const dec=new TextDecoder(); let buf='';
+    for(;;){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let idx, doneFlag=false;
+      while((idx=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
+        if(!line.startsWith('data:')) continue;
+        const data=line.slice(5).trim();
+        if(data==='[DONE]'){ doneFlag=true; break; }
+        let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
+        if(ch.meta && ch.meta.searched && !prefix && bubble){ const p=document.createElement('div'); p.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; p.textContent='🌐 已联网搜索'; bubble.insertBefore(p,bubble.firstChild); prefix=true; }
+        if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
+      }
+      if(doneFlag) break;
+    }
+    lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
+    if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
+    speak(acc);
+    clearRef();
+    const ss=curSession();
+    if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
+  }catch(e){
+    if(acc){
+      lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
+      if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
+      scrollBottom();
+    } else {
+      failMsgRetry(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':((e&&e.message)||String(e)), body);
+    }
+  }
 }
 // 生图任务轮询: 独立短请求逐个拉取, 锁屏/切后台恢复后能继续, 不会因单次长请求被杀而丢结果
 async function pollTask(j){
