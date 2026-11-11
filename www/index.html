@@ -1127,7 +1127,7 @@ function showSession(id){
       const disp=String(m.display||m.text||'');
       // 只为"真正待生成"(无文本且无媒体)的消息显示转圈; 已完成/带内容的消息即使 loading 标记异常也按内容渲染, 避免图片突然变"思考中"
       const hasContent = !!disp.trim() || meds.length>0;
-      if(m.loading && !hasContent){ const el=addMsg('ai','',[],[],m.id,true); el.querySelector('.bubble').innerHTML='<span class="spinner"></span>'; }
+      if(m.loading && !hasContent){ const el=addMsg('ai','',[],[],m.id,true); el.querySelector('.bubble').innerHTML='<span style="color:var(--muted);font-size:13px">⚠️ 上次回答未完成</span>'; }
       else {
         let d=disp;
         if(m.role==='user'&&m.hasImgs&&!imgs.length&&!d.trim()) d='📷 [图片]';
@@ -1296,7 +1296,7 @@ async function streamSend(lm, body, ac){
   if(bubble){ bubble.innerHTML=''; }
   const textEl=document.createElement('div'); textEl.className='text';
   if(bubble) bubble.appendChild(textEl);
-  let prefix=false, acc='', statusEl=null;
+  let prefix=false, acc='', statusEl=null, persistAt=0;
   // XHR 渐进式流读取: iOS WKWebView 对 fetch(ReadableStream) 的增量解析不可靠(常整段缓冲或挂起, 表现为"一直思考中"),
   // 改用 XHR onprogress 逐段读 responseText, 是 WKWebView 下最可靠的"逐字输出"方式
   return new Promise((resolve)=>{
@@ -1305,6 +1305,8 @@ async function streamSend(lm, body, ac){
       if(settled) return; settled=true;
       lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
       if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
+      // 关键: 完成后立即持久化(loadingMsg 曾把 loading+空 写入 localStorage, 原代码结束后没保存, 重开会读到"loading+空"一直转圈)
+      const _s=findSessionOf(lm.m)||curSession(); if(_s){ autoTitle(_s); saveSess(); }
       if(errMsg){
         if(!acc) failMsgRetry(lm, errMsg, body); else scrollBottom();
       } else {
@@ -1341,6 +1343,10 @@ async function streamSend(lm, body, ac){
           }
           if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
         }
+        // 增量持久化: 把已收到的内容实时写回; 防止 App 被杀/中断时最后一条停留在 loading+空(重开后一直转圈)
+        lm.m.text=acc; lm.m.display=acc;
+        const _now=Date.now();
+        if(!persistAt || _now-persistAt>800){ persistAt=_now; const _s=findSessionOf(lm.m)||curSession(); if(_s){ saveSess(); } }
         if(stop) buf='';
       };
       xhr.open('POST', API+'/api/chat', true);
