@@ -1297,40 +1297,56 @@ async function streamSend(lm, body, ac){
   const textEl=document.createElement('div'); textEl.className='text';
   if(bubble) bubble.appendChild(textEl);
   let prefix=false, acc='';
-  try{
-    const res=await fetch(API+'/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify({...body, stream:true}),signal:ac.signal});
-    if(!res.ok || !res.body) throw new Error('HTTP '+res.status);
-    const reader=res.body.getReader(); const dec=new TextDecoder(); let buf='';
-    for(;;){
-      const {done,value}=await reader.read(); if(done) break;
-      buf+=dec.decode(value,{stream:true});
-      let idx, doneFlag=false;
-      while((idx=buf.indexOf('\n'))>=0){
-        const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
-        if(!line.startsWith('data:')) continue;
-        const data=line.slice(5).trim();
-        if(data==='[DONE]'){ doneFlag=true; break; }
-        let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
-        if(ch.meta && ch.meta.searched && !prefix && bubble){ const p=document.createElement('div'); p.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; p.textContent='🌐 已联网搜索'; bubble.insertBefore(p,bubble.firstChild); prefix=true; }
-        if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
-      }
-      if(doneFlag) break;
-    }
-    lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
-    if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
-    speak(acc);
-    clearRef();
-    const ss=curSession();
-    if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
-  }catch(e){
-    if(acc){
+  // XHR 渐进式流读取: iOS WKWebView 对 fetch(ReadableStream) 的增量解析不可靠(常整段缓冲或挂起, 表现为"一直思考中"),
+  // 改用 XHR onprogress 逐段读 responseText, 是 WKWebView 下最可靠的"逐字输出"方式
+  return new Promise((resolve)=>{
+    let settled=false;
+    const done=(errMsg)=>{
+      if(settled) return; settled=true;
       lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
       if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
-      scrollBottom();
-    } else {
-      failMsgRetry(lm, ac.signal.aborted?'响应太慢（可能联网搜索中），请稍后重试':((e&&e.message)||String(e)), body);
-    }
-  }
+      if(errMsg){
+        if(!acc) failMsgRetry(lm, errMsg, body); else scrollBottom();
+      } else {
+        speak(acc);
+        clearRef();
+        const ss=curSession();
+        if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
+      }
+      resolve();
+    };
+    let xhr=null;
+    try{
+      xhr=new XMLHttpRequest();
+      let buf='', consumed=0;
+      const feed=(full)=>{
+        const seg=full.slice(consumed); consumed=full.length; buf+=seg;
+        let idx, stop=false;
+        while((idx=buf.indexOf('\n'))>=0){
+          const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
+          if(!line.startsWith('data:')) continue;
+          const data=line.slice(5).trim();
+          if(data==='[DONE]'){ stop=true; break; }
+          let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
+          if(ch.meta && ch.meta.searched && !prefix && bubble){ const p=document.createElement('div'); p.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; p.textContent='🌐 已联网搜索'; bubble.insertBefore(p,bubble.firstChild); prefix=true; }
+          if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
+        }
+        if(stop) buf='';
+      };
+      xhr.open('POST', API+'/api/chat', true);
+      xhr.setRequestHeader('Content-Type','application/json');
+      xhr.setRequestHeader('Authorization','Bearer '+sessionToken);
+      xhr.responseType='text';
+      xhr.timeout=300000;
+      if(ac && ac.signal) ac.signal.addEventListener('abort', ()=>{ try{ xhr.abort(); }catch(e){} });
+      xhr.onprogress=()=>{ try{ if(xhr.readyState>=3 && xhr.responseText) feed(xhr.responseText); }catch(e){} };
+      xhr.onload=()=>{ try{ if(xhr.responseText) feed(xhr.responseText); }catch(e){} done(null); };
+      xhr.onerror=()=>{ done((ac&&ac.signal&&ac.signal.aborted)?'响应太慢（可能联网搜索中），请稍后重试':'网络连接失败'); };
+      xhr.ontimeout=()=>{ done('响应太慢（可能联网搜索中），请稍后重试'); };
+      xhr.onabort=()=>{ done((ac&&ac.signal&&ac.signal.aborted)?'响应太慢（可能联网搜索中），请稍后重试':'请求被取消'); };
+      xhr.send(JSON.stringify({...body, stream:true}));
+    }catch(e){ done('请求失败：'+((e&&e.message)||String(e))); }
+  });
 }
 // 生图任务轮询: 独立短请求逐个拉取, 锁屏/切后台恢复后能继续, 不会因单次长请求被杀而丢结果
 async function pollTask(j){
