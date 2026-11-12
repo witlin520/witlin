@@ -515,7 +515,10 @@ warmUpBackend();
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 // 轻量 Markdown 渲染(先 esc 再转安全HTML, 标题/加粗/列表/代码/引用/链接)
 function md(s){
-  s=esc(String(s==null?'':s));
+  // 先提取 Markdown 图片 ![alt](url): 要在 esc 前做, 避免 url 里的 & 被转义破坏, 也避免被行内链接误转
+  var imgs=[];
+  s=String(s==null?'':s).replace(/!\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/g,function(mm,alt,url){imgs.push({alt:alt,url:url});return '\u0000I'+(imgs.length-1)+'\u0000';});
+  s=esc(s);
   // 保护代码块(含换行), 避免行扫描/行内转换误伤
   var blocks=[];
   s=s.replace(/```([\s\S]*?)```/g,function(m,c){blocks.push(c);return '\u0000B'+(blocks.length-1)+'\u0000'});
@@ -544,6 +547,8 @@ function md(s){
   s=s.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
   s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
   s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // 最后恢复内嵌图片(放在行内转换与代码块之后, 避免被二次处理)
+  s=s.replace(/\u0000I(\d+)\u0000/g,function(_,i){var it=imgs[+i];return '<img class="poi-img" style="max-width:100%;border-radius:8px;margin:6px 0;display:block" data-mu="'+esc(it.url)+'" alt="'+esc(it.alt)+'" loading="lazy" onerror="mediaImgError(this)">';});
   // 最后恢复代码块(内容只经 esc, 不做 markdown 转换)
   s=s.replace(/\u0000B(\d+)\u0000/g,function(_,i){return '<pre><code>'+blocks[+i]+'</code></pre>'});
   return s;
@@ -1214,7 +1219,10 @@ async function doLogin(){
   try{
     const r=await apiFetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
     const j=await r.json();
-    if(j.ok&&j.token){sessionToken=j.token;try{localStorage.setItem('oc_session',j.token)}catch(e){};hideLogin();toast('登录成功');initApp()}
+    if(j.ok&&j.token){sessionToken=j.token;try{localStorage.setItem('oc_session',j.token)}catch(e){};hideLogin();toast('登录成功');
+      // 登录后网络通常已就绪, 重新探测正确基站, 避免冷启动网络未通时误选公网/不可达地址导致"连不上"
+      try{ await pickApiBase(); }catch(e){}
+      initApp();}
     else{$('lerr').textContent=j.error?j.error.message:'登录失败'}
   }catch(e){$('lerr').textContent='网络错误，请重试'}
 }
@@ -1335,10 +1343,11 @@ async function streamSend(lm, body, ac){
     let h='';
     if(stageText) h+='<div style="font-size:12px;color:var(--accent);margin-bottom:6px">'+esc(stageText)+'</div>';
     if(acc) h+='<div class="text">'+md(acc)+'</div>';
-    if(streamMedia && streamMedia.length && !(!acc && !stageText)) h+=mediaHtml(streamMedia);
+    // 行程文本已内嵌图片(含 ![..](..))时不再末尾追加 media 列表, 避免图重复堆在结尾
+    if(streamMedia && streamMedia.length && !/!\[[^\]]*\]\([^)]*\)/.test(acc) && !(!acc && !stageText)) h+=mediaHtml(streamMedia);
     if(!acc && !stageText && !streamMedia.length) h='<span class="spinner"></span> 思考中…';
     b.innerHTML=h;
-    if(streamMedia && streamMedia.length) hydrateMedia(b);
+    hydrateMedia(b);
   };
   return new Promise((resolve)=>{
     let settled=false;
