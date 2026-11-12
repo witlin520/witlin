@@ -111,6 +111,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei
 #gen .btns button.gray{background:#eee;color:#333}
 .mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10}
 .toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.8);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;z-index:50;display:none}
+/* 前端免重装更新提示条(方案B) */
+#feUpBar{position:fixed;bottom:calc(76px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:rgba(20,20,24,.92);color:#fff;padding:8px 14px;border-radius:12px;font-size:13px;z-index:60;box-shadow:0 4px 16px rgba(0,0,0,.2);white-space:nowrap;max-width:92vw}
+#feUpBar button{border:none;background:var(--accent);color:#fff;padding:5px 12px;border-radius:8px;font-size:13px;cursor:pointer}
+#feUpBar button:active{opacity:.8}
 #healthBar{display:none;align-items:center;gap:6px;padding:8px 14px;background:#fff3e0;color:#7a4f00;font-size:12px;cursor:pointer;border-bottom:1px solid var(--line)}
 html.dark #healthBar{background:#3a2e12;color:#ffd591}
 #diag{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-radius:18px 18px 0 0;z-index:12;max-height:82dvh;flex-direction:column;box-sizing:border-box;padding:16px 16px calc(env(safe-area-inset-bottom)+12px)}
@@ -347,6 +351,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <div class="toast" id="toast"></div>
 <div id="healthBar" onclick="openDiag()" role="button" tabindex="0"></div>
+<div id="feUpBar"></div>
 <div id="diag">
   <h3>🩺 运行诊断 <button class="close" onclick="closeDiag()">关闭</button></h3>
   <div id="diagBody"></div>
@@ -390,6 +395,8 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 </div>
 
 <script>
+// 前端版本常量(方案B): 打包版自带版本号; 后台对比后端 /api/frontend/version, 有新版本则提示刷新加载同源最新页.
+window.__APP_VER_INIT__ = '2026-11-12_2';
 // API 基站: 局域网优先(快速直达), 公网域名兜底; 自动探测+缓存上次可用, 保证又快又稳
 const IS_WEB=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname));
 const API_CANDIDATES=IS_WEB?[location.origin]:['http://192.168.1.9:8090','https://soul0516.duckdns.org:46893'];
@@ -513,6 +520,29 @@ function warmUpBackend(){
 }
 warmUpBackend();
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+// ---------- 前端免重装更新(方案B): 本地秒开 + 后台静默检测 ----------
+// 打包版首屏直接渲染本地(零等待); 后台对比后端最新版本, 有新版本则提示"点击刷新"加载同源最新页.
+// 离线/后端未部署/网络未就绪 -> 静默回退本地打包版, 不阻塞、不报错.
+function feUpdateBar(ver){
+  const b=$('feUpBar'); if(!b){ return; }
+  b.style.display='flex';
+  b.innerHTML='<span>🆕 发现新版本（'+esc(ver)+'）</span><button type="button" onclick="applyFeUpdate()">点击刷新</button>';
+}
+function applyFeUpdate(){
+  try{ window.location.href = API + '/'; }catch(e){ toast('刷新失败'); }
+}
+async function checkFeUpdate(){
+  try{
+    const base = await pickApiBase().catch(()=>API);   // 确保用正确基站, 避免冷启动时API未就绪
+    const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),8000);
+    const r=await fetch(base+'/api/frontend/version',{signal:ac.signal, headers:{'Accept':'application/json'}});
+    clearTimeout(to);
+    const j=await r.json();
+    if(!j || !j.ok || !j.version) return;
+    if(j.version === window.__APP_VER_INIT__) return;   // 已是最新, 不打扰
+    feUpdateBar(j.version);
+  }catch(e){ /* 离线/失败: 回退本地打包版, 静默 */ }
+}
 // 轻量 Markdown 渲染(先 esc 再转安全HTML, 标题/加粗/列表/代码/引用/链接)
 function md(s){
   // 先提取 Markdown 图片 ![alt](url): 要在 esc 前做, 避免 url 里的 & 被转义破坏, 也避免被行内链接误转
@@ -1771,6 +1801,8 @@ document.getElementById('audiofile').addEventListener('change',e=>{if(e.target.f
 document.getElementById('clipfile').addEventListener('change',e=>{addClipFiles(e.target.files);e.target.value=''});
 bootHealth();   // 启动自检: 连不上后端时显示诊断条, 不再盲目转圈
 if(sessionToken){hideLogin();initApp()}else{showLogin()}
+// 方案B: 本地已秒开, 后台静默检测前端更新, 有新版本提示刷新(免重装)
+checkFeUpdate();
 </script>
 <script type="module" src="./cognition.js"></script>
 </body>
