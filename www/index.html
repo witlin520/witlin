@@ -1328,14 +1328,16 @@ async function streamSend(lm, body, ac){
     }
     return el ? (el.querySelector('.bubble')||el) : null;
   };
-  let acc='', stageText='', persistAt=0;
+  let acc='', stageText='', persistAt=0, streamMedia=[];
   const render=()=>{
     const b=getBubble(); if(!b) return;
     let h='';
     if(stageText) h+='<div style="font-size:12px;color:var(--accent);margin-bottom:6px">'+esc(stageText)+'</div>';
     if(acc) h+='<div class="text">'+md(acc)+'</div>';
-    if(!acc && !stageText) h='<span class="spinner"></span> 思考中…';
+    if(streamMedia && streamMedia.length && !(!acc && !stageText)) h+=mediaHtml(streamMedia);
+    if(!acc && !stageText && !streamMedia.length) h='<span class="spinner"></span> 思考中…';
     b.innerHTML=h;
+    if(streamMedia && streamMedia.length) hydrateMedia(b);
   };
   return new Promise((resolve)=>{
     let settled=false;
@@ -1343,6 +1345,7 @@ async function streamSend(lm, body, ac){
       if(settled) return; settled=true;
       // 强制把最终内容写进自己的气泡(即使流式过程中元素被替换)
       lm.m.text=acc; lm.m.display=acc; lm.m.loading=false;
+      if(streamMedia && streamMedia.length) lm.m.media=streamMedia;   // 流式可能带 media(如行程规划图片)
       if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
       render();
       const _s=findSessionOf(lm.m)||curSession(); if(_s){ autoTitle(_s); saveSess(); }
@@ -1375,9 +1378,11 @@ async function streamSend(lm, body, ac){
                 else if(ch.meta.stage==='searching'){ stageText='🌐 正在联网搜索…'; }
                 else if(ch.meta.stage==='intent'){ stageText='⏳ 正在分析意图…'; }
                 else if(ch.meta.stage==='thinking'){ stageText='⏳ 思考中…'; }
+                else if(ch.meta.stage==='规划行程'){ stageText='🗺️ 正在规划行程…'; }
                 else { stageText='⏳ '+(ch.meta.stage||'处理中')+'…'; }
                 render();
               }
+              if(ch.media && Array.isArray(ch.media) && ch.media.length){ streamMedia=ch.media; render(); scrollBottom(); }
               if(ch.t){ if(acc==='') stageText=''; acc+=ch.t; render(); scrollBottom(); }
             }catch(e){}
           }
