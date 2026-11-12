@@ -1322,32 +1322,38 @@ async function streamSend(lm, body, ac){
       xhr=new XMLHttpRequest();
       let buf='', consumed=0;
       const feed=(full)=>{
-        const seg=full.slice(consumed); consumed=full.length; buf+=seg;
-        let idx, stop=false;
-        while((idx=buf.indexOf('\n'))>=0){
-          const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
-          if(!line.startsWith('data:')) continue;
-          const data=line.slice(5).trim();
-          if(data==='[DONE]'){ stop=true; break; }
-          let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
-          // 阶段进度(后端提前发): 联网搜索/意图识别期间给用户即时反馈, 避免长时间"思考中"像卡死
-          if(ch.meta && (ch.meta.stage || ch.meta.searched)){
-            if(!statusEl && bubble){ statusEl=document.createElement('div'); statusEl.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; bubble.insertBefore(statusEl,bubble.firstChild); }
-            if(statusEl){
-              if(ch.meta.searched){ statusEl.textContent='🌐 已联网搜索'; prefix=true; }
-              else if(ch.meta.stage==='searching'){ statusEl.textContent='🌐 正在联网搜索…'; }
-              else if(ch.meta.stage==='intent'){ statusEl.textContent='⏳ 正在分析意图…'; }
-              else if(ch.meta.stage==='thinking'){ statusEl.textContent='⏳ 思考中…'; }
-              else { statusEl.textContent='⏳ '+(ch.meta.stage||'处理中')+'…'; }
-            }
+        try{
+          const seg=full.slice(consumed); consumed=full.length; buf+=seg;
+          let idx, stop=false;
+          while((idx=buf.indexOf('\n'))>=0){
+            const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
+            if(!line.startsWith('data:')) continue;
+            const data=line.slice(5).trim();
+            if(data==='[DONE]'){ stop=true; break; }
+            let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
+            try{
+              if(ch.meta && (ch.meta.stage || ch.meta.searched)){
+                if(!statusEl && bubble){ statusEl=document.createElement('div'); statusEl.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; bubble.insertBefore(statusEl,bubble.firstChild); }
+                if(statusEl){
+                  if(ch.meta.searched){ statusEl.textContent='🌐 已联网搜索'; prefix=true; }
+                  else if(ch.meta.stage==='searching'){ statusEl.textContent='🌐 正在联网搜索…'; }
+                  else if(ch.meta.stage==='intent'){ statusEl.textContent='⏳ 正在分析意图…'; }
+                  else if(ch.meta.stage==='thinking'){ statusEl.textContent='⏳ 思考中…'; }
+                  else { statusEl.textContent='⏳ '+(ch.meta.stage||'处理中')+'…'; }
+                }
+              }
+              if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
+            }catch(e){}
           }
-          if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
-        }
-        // 增量持久化: 把已收到的内容实时写回; 防止 App 被杀/中断时最后一条停留在 loading+空(重开后一直转圈)
-        lm.m.text=acc; lm.m.display=acc;
-        const _now=Date.now();
-        if(!persistAt || _now-persistAt>800){ persistAt=_now; const _s=findSessionOf(lm.m)||curSession(); if(_s){ saveSess(); } }
-        if(stop) buf='';
+          // 增量持久化: 把已收到的内容实时写回; 防止 App 被杀/中断时最后一条停留在 loading+空(重开后一直转圈)
+          // 关键: 持久化/会话查找异常绝不中断主解析(曾经 saveSess 抛错导致 feed 中断、consumed 前移, 剩余缓冲不再解析 -> 卡"思考中")
+          try{
+            lm.m.text=acc; lm.m.display=acc;
+            const _now=Date.now();
+            if(!persistAt || _now-persistAt>800){ persistAt=_now; const _s=findSessionOf(lm.m)||curSession(); if(_s){ saveSess(); } }
+          }catch(e){}
+          if(stop) buf='';
+        }catch(e){}
       };
       xhr.open('POST', API+'/api/chat', true);
       xhr.setRequestHeader('Content-Type','application/json');
