@@ -1317,27 +1317,39 @@ async function doSend(lm, body){
 }
 // 流式发送: SSE 逐字渲染(纯文字对话); 生图/视频走原非流式(后台任务)
 async function streamSend(lm, body, ac){
-  const tEl=msgEl(lm.m.id)||lm.el;
-  const bubble=tEl && tEl.querySelector ? tEl.querySelector('.bubble') : null;
-  if(bubble){ bubble.innerHTML=''; }
-  const textEl=document.createElement('div'); textEl.className='text';
-  if(bubble) bubble.appendChild(textEl);
-  let prefix=false, acc='', statusEl=null, persistAt=0;
-  // XHR 渐进式流读取: iOS WKWebView 对 fetch(ReadableStream) 的增量解析不可靠(常整段缓冲或挂起, 表现为"一直思考中"),
-  // 改用 XHR onprogress 逐段读 responseText, 是 WKWebView 下最可靠的"逐字输出"方式
+  // 流式渲染: 每次都用 data-mid 动态解析当前消息气泡, 避免 DOM 被重渲染/切会话后引用失效
+  // 导致 token 写到旧节点(答案错位到别的消息) 或 loading 气泡一直转圈
+  const getBubble=()=>{
+    let el = (lm.m.id!==undefined)? msgEl(lm.m.id) : null;
+    if(!el || !el.parentNode){ el = (lm.el && lm.el.parentNode)? lm.el : null; }
+    if(!el && lm.m.id!==undefined){
+      const sess=curSession(); const found=sess && sess.messages && sess.messages.find(x=>x.id===lm.m.id);
+      if(found){ el=addMsg('ai','',[],[],lm.m.id,false); lm.el=el; }
+    }
+    return el ? (el.querySelector('.bubble')||el) : null;
+  };
+  let acc='', stageText='', persistAt=0;
+  const render=()=>{
+    const b=getBubble(); if(!b) return;
+    let h='';
+    if(stageText) h+='<div style="font-size:12px;color:var(--accent);margin-bottom:6px">'+esc(stageText)+'</div>';
+    if(acc) h+='<div class="text">'+md(acc)+'</div>';
+    if(!acc && !stageText) h='<span class="spinner"></span> 思考中…';
+    b.innerHTML=h;
+  };
   return new Promise((resolve)=>{
     let settled=false;
     const done=(errMsg)=>{
       if(settled) return; settled=true;
-      lm.m.text=acc; lm.m.display=acc; if(lm.m) lm.m.loading=false;
+      // 强制把最终内容写进自己的气泡(即使流式过程中元素被替换)
+      lm.m.text=acc; lm.m.display=acc; lm.m.loading=false;
       if(lm.el && lm.el.classList) lm.el.classList.remove('loading');
-      // 关键: 完成后立即持久化(loadingMsg 曾把 loading+空 写入 localStorage, 原代码结束后没保存, 重开会读到"loading+空"一直转圈)
+      render();
       const _s=findSessionOf(lm.m)||curSession(); if(_s){ autoTitle(_s); saveSess(); }
       if(errMsg){
         if(!acc) failMsgRetry(lm, errMsg, body); else scrollBottom();
       } else {
-        speak(acc);
-        clearRef();
+        speak(acc); clearRef();
         const ss=curSession();
         if(ss && ss.messages.filter(m=>!m.loading&&m.text).length>24) compressContext(ss,true);
       }
@@ -1359,20 +1371,17 @@ async function streamSend(lm, body, ac){
             let ch; try{ ch=JSON.parse(data); }catch(e){ continue; }
             try{
               if(ch.meta && (ch.meta.stage || ch.meta.searched)){
-                if(!statusEl && bubble){ statusEl=document.createElement('div'); statusEl.style.cssText='font-size:12px;color:var(--accent);margin-bottom:6px'; bubble.insertBefore(statusEl,bubble.firstChild); }
-                if(statusEl){
-                  if(ch.meta.searched){ statusEl.textContent='🌐 已联网搜索'; prefix=true; }
-                  else if(ch.meta.stage==='searching'){ statusEl.textContent='🌐 正在联网搜索…'; }
-                  else if(ch.meta.stage==='intent'){ statusEl.textContent='⏳ 正在分析意图…'; }
-                  else if(ch.meta.stage==='thinking'){ statusEl.textContent='⏳ 思考中…'; }
-                  else { statusEl.textContent='⏳ '+(ch.meta.stage||'处理中')+'…'; }
-                }
+                if(ch.meta.searched){ stageText='🌐 已联网搜索'; }
+                else if(ch.meta.stage==='searching'){ stageText='🌐 正在联网搜索…'; }
+                else if(ch.meta.stage==='intent'){ stageText='⏳ 正在分析意图…'; }
+                else if(ch.meta.stage==='thinking'){ stageText='⏳ 思考中…'; }
+                else { stageText='⏳ '+(ch.meta.stage||'处理中')+'…'; }
+                render();
               }
-              if(ch.t){ acc+=ch.t; if(textEl){ textEl.innerHTML=md(acc); scrollBottom(); } }
+              if(ch.t){ acc+=ch.t; render(); scrollBottom(); }
             }catch(e){}
           }
-          // 增量持久化: 把已收到的内容实时写回; 防止 App 被杀/中断时最后一条停留在 loading+空(重开后一直转圈)
-          // 关键: 持久化/会话查找异常绝不中断主解析(曾经 saveSess 抛错导致 feed 中断、consumed 前移, 剩余缓冲不再解析 -> 卡"思考中")
+          // 增量持久化: 实时写回, 防止中断后停留在 loading+空
           try{
             lm.m.text=acc; lm.m.display=acc;
             const _now=Date.now();
