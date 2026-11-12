@@ -572,29 +572,43 @@ function setLocUI(){ /* 定位条已移除, 静默按需, 无 UI */ }
 async function askIpLoc(){
   try{
     const r=await apiFetch(API+'/api/location',{headers:authHeaders()}); const j=await r.json();
-    if(j&&j.ok){ userLoc=j; saveLoc(); return userLoc; }
+    if(j&&j.ok){ j.src='ip'; userLoc=j; saveLoc(); return userLoc; }
   }catch(e){}
   return null;
 }
 async function locateMe(useGeo, lat, lng){
-  // 1) 传了坐标 -> 逆地理 (photon)
+  // 1) 传了坐标 -> 逆地理 (photon). 来源是设备GPS, 记为 gps
   if(!isNaN(lat) && !isNaN(lng)){
     try{
       const r=await apiFetch(API+'/api/location?lat='+lat+'&lng='+lng,{headers:authHeaders()}); const j=await r.json();
-      if(j&&j.ok){ userLoc=j; saveLoc(); return userLoc; }
+      if(j&&j.ok){ j.src='gps'; userLoc=j; saveLoc(); return userLoc; }
     }catch(e){}
+    return {ok:true, src:'gps', label:'坐标 '+lat.toFixed(5)+','+lng.toFixed(5), lat, lng};
   }
   // 1.5) 原生 App: 用 Capacitor 定位插件拿【真 GPS】(比 IP 精确得多, 到街道级)
   if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Geolocation){
     try{
-      const pos = await window.Capacitor.Plugins.Geolocation.getCurrentPosition({enableHighAccuracy:true, timeout:10000});
+      const pos = await window.Capacitor.Plugins.Geolocation.getCurrentPosition({enableHighAccuracy:true, timeout:12000});
       const c = pos && pos.coords;
       if(c && c.latitude!=null && c.longitude!=null){
         return await locateMe(false, c.latitude, c.longitude);
       }
     }catch(e){}
   }
-  // 2) 浏览器自动定位 (需 HTTPS; 当前 HTTP 会失败 -> 自动回退 IP 概略)
+  // 1.6) Capacitor WKWebView 内兜底: 插件的全局名有时未暴露, 但 web geolocation 同样走系统定位
+  if(window.Capacitor && navigator.geolocation){
+    try{
+      const pos = await new Promise(res=>{
+        navigator.geolocation.getCurrentPosition(
+          p=>res({ok:true, lat:p.coords.latitude, lng:p.coords.longitude}),
+          e=>res({ok:false}),
+          {enableHighAccuracy:true, timeout:10000, maximumAge:0}
+        );
+      });
+      if(pos && pos.ok) return await locateMe(false, pos.lat, pos.lng);
+    }catch(e){}
+  }
+  // 2) 纯浏览器 (非 App): 用 web 定位 (需 HTTPS; 当前 HTTP 会失败 -> 自动回退 IP 概略)
   if(!window.Capacitor && useGeo!==false && navigator.geolocation){
     const pos = await new Promise(res=>{
       navigator.geolocation.getCurrentPosition(
@@ -606,7 +620,9 @@ async function locateMe(useGeo, lat, lng){
     if(pos && pos.ok) return await locateMe(false, pos.lat, pos.lng);
   }
   // 3) IP 概略 (服务器出口)
-  return await askIpLoc();
+  const ip = await askIpLoc();
+  if(ip) ip.src='ip';
+  return ip;
 }
 function clearLoc(){ userLoc=null; saveLoc(); }
 // 是否需要按需定位的位置相关词 (查天气/附近等)
