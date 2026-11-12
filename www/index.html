@@ -1378,7 +1378,7 @@ async function streamSend(lm, body, ac){
                 else { stageText='⏳ '+(ch.meta.stage||'处理中')+'…'; }
                 render();
               }
-              if(ch.t){ acc+=ch.t; render(); scrollBottom(); }
+              if(ch.t){ if(acc==='') stageText=''; acc+=ch.t; render(); scrollBottom(); }
             }catch(e){}
           }
           // 增量持久化: 实时写回, 防止中断后停留在 loading+空
