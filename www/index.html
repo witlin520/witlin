@@ -584,6 +584,16 @@ async function locateMe(useGeo, lat, lng){
       if(j&&j.ok){ userLoc=j; saveLoc(); return userLoc; }
     }catch(e){}
   }
+  // 1.5) 原生 App: 用 Capacitor 定位插件拿【真 GPS】(比 IP 精确得多, 到街道级)
+  if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Geolocation){
+    try{
+      const pos = await window.Capacitor.Plugins.Geolocation.getCurrentPosition({enableHighAccuracy:true, timeout:10000});
+      const c = pos && pos.coords;
+      if(c && c.latitude!=null && c.longitude!=null){
+        return await locateMe(false, c.latitude, c.longitude);
+      }
+    }catch(e){}
+  }
   // 2) 浏览器自动定位 (需 HTTPS; 当前 HTTP 会失败 -> 自动回退 IP 概略)
   if(!window.Capacitor && useGeo!==false && navigator.geolocation){
     const pos = await new Promise(res=>{
