@@ -345,8 +345,8 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
     <img id="vimg" alt="">
     <video id="vvid" controls onclick="event.stopPropagation()"></video>
   </div>
-  <button class="v-nav v-prev" id="vprev" onclick="vNav(-1)">‹</button>
-  <button class="v-nav v-next" id="vnext" onclick="vNav(1)">›</button>
+  <button class="v-nav v-prev" id="vprev" onclick="event.stopPropagation(); vNav(-1)">‹</button>
+  <button class="v-nav v-next" id="vnext" onclick="event.stopPropagation(); vNav(1)">›</button>
   <div class="v-badge" id="vbadge"></div>
   <button class="v-x" onclick="vzClose()">✕</button>
   <div class="v-zoom" id="vzoom" onclick="event.stopPropagation()">
@@ -403,7 +403,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <script>
 // 前端版本常量(方案B): 打包版自带版本号; 后台对比后端 /api/frontend/version, 有新版本则提示刷新加载同源最新页.
-window.__APP_VER_INIT__ = '2026-11-13_1';
+window.__APP_VER_INIT__ = '2026-11-13_2';
 // API 基站: 局域网优先(快速直达), 公网域名兜底; 自动探测+缓存上次可用, 保证又快又稳
 const IS_WEB=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname));
 const API_CANDIDATES=IS_WEB?[location.origin]:['http://192.168.1.9:8090','https://soul0516.duckdns.org:46893'];
