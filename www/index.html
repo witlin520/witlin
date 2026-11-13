@@ -316,6 +316,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 .v-nav{position:fixed;top:50%;transform:translateY(-50%);z-index:10002;width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.18);color:#fff;font-size:28px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
 .v-prev{left:calc(env(safe-area-inset-left) + 10px)}
 .v-next{right:calc(env(safe-area-inset-right) + 10px)}
+.v-badge{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:50%;transform:translateX(-50%);z-index:10002;color:#fff;background:rgba(255,255,255,.18);padding:4px 14px;border-radius:14px;font-size:13px;font-weight:600;display:none;pointer-events:none}
 .v-zoom.on{display:flex}
 .v-zoom button{width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:18px;cursor:pointer}
 .media img{cursor:zoom-in}
@@ -346,6 +347,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
   </div>
   <button class="v-nav v-prev" id="vprev" onclick="vNav(-1)">‹</button>
   <button class="v-nav v-next" id="vnext" onclick="vNav(1)">›</button>
+  <div class="v-badge" id="vbadge"></div>
   <button class="v-x" onclick="vzClose()">✕</button>
   <div class="v-zoom" id="vzoom" onclick="event.stopPropagation()">
     <button onclick="vzAdj(-1)">−</button>
@@ -401,7 +403,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <script>
 // 前端版本常量(方案B): 打包版自带版本号; 后台对比后端 /api/frontend/version, 有新版本则提示刷新加载同源最新页.
-window.__APP_VER_INIT__ = '2026-11-12_4';
+window.__APP_VER_INIT__ = '2026-11-13_1';
 // API 基站: 局域网优先(快速直达), 公网域名兜底; 自动探测+缓存上次可用, 保证又快又稳
 const IS_WEB=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname));
 const API_CANDIDATES=IS_WEB?[location.origin]:['http://192.168.1.9:8090','https://soul0516.duckdns.org:46893'];
@@ -960,6 +962,7 @@ function updateVNav(){
   const multi=vList.length>1;
   p.style.display=(multi && vCur>0)?'flex':'none';
   n.style.display=(multi && vCur<vList.length-1)?'flex':'none';
+  const b=$('vbadge'); if(b){ b.style.display=multi?'block':'none'; if(multi) b.textContent=(vCur+1)+'/'+vList.length; }
 }
 function vNav(d){
   const n=vCur+d; if(n<0||n>=vList.length)return;
@@ -1002,16 +1005,30 @@ function vApply(){ const im=$('vimg'); if(im) im.style.transform='translate('+vT
 function vzFit(){ vScale=1; vTx=0; vTy=0; vApply(); }
 function vzTap(){ vScale=(vScale>1?1:2); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
 function vzAdj(d){ vScale=Math.min(8,Math.max(1,Math.round((vScale+d*0.5)*10)/10)); if(vScale<=1){vTx=0;vTy=0;} vApply(); }
-(function(){ const stage=$('vstage'); if(!stage) return; let sd=0,ss=1,ps=null;
+(function(){ const stage=$('vstage'); if(!stage) return; let sd=0,ss=1,ps=null,swOn=false,swx=0,swy=0;
   stage.addEventListener('touchstart',function(e){
-    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; sd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; ss=vScale; e.preventDefault(); }
-    else if(e.touches.length===1 && vScale>1){ ps={x:e.touches[0].clientX,y:e.touches[0].clientY,tx:vTx,ty:vTy}; }
+    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; sd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; ss=vScale; ps=null; swOn=false; e.preventDefault(); }
+    else if(e.touches.length===1){
+      if(vScale>1){ ps={x:e.touches[0].clientX,y:e.touches[0].clientY,tx:vTx,ty:vTy}; swOn=false; }
+      else { swOn=true; swx=e.touches[0].clientX; swy=e.touches[0].clientY; }   // 适配态单指: 记录起点, 供横滑切图
+    }
   },{passive:false});
   stage.addEventListener('touchmove',function(e){
-    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; vScale=Math.min(8,Math.max(1,ss*(d/sd))); if(vScale<=1){vTx=0;vTy=0;} vApply(); e.preventDefault(); }
-    else if(e.touches.length===1 && ps){ vTx=ps.tx+(e.touches[0].clientX-ps.x); vTy=ps.ty+(e.touches[0].clientY-ps.y); vApply(); e.preventDefault(); }
+    if(e.touches.length===2){ const a=e.touches[0],b=e.touches[1]; const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1; vScale=Math.min(8,Math.max(1,ss*(d/sd))); if(vScale<=1){vTx=0;vTy=0;} ps=null; vApply(); e.preventDefault(); }
+    else if(e.touches.length===1 && ps){ vTx=ps.tx+(e.touches[0].clientX-ps.x); vTy=ps.ty+(e.touches[0].clientY-ps.y); ps.x=e.touches[0].clientX; ps.y=e.touches[0].clientY; vApply(); e.preventDefault(); }
+    // 适配态(vScale<=1)单指: 不拦截滚动, 交由 touchend 判定横向位移是否切图
   },{passive:false});
-  stage.addEventListener('touchend',function(e){ if(e.touches.length<2) sd=0; if(e.touches.length===0) ps=null; });
+  stage.addEventListener('touchend',function(e){
+    if(swOn && e.changedTouches.length){
+      const a=e.changedTouches[0];
+      if(vScale<=1 && vList.length>1){
+        const dx=a.clientX-swx, dy=a.clientY-swy;
+        if(Math.abs(dx)>60 && Math.abs(dx)>Math.abs(dy)*1.5) vNav(dx<0?1:-1);
+      }
+    }
+    if(e.touches.length<2) sd=0;
+    ps=null; swOn=false;
+  });
 })();
 
 // ---------- 新对话图标显隐 (有对话才显示) ----------
