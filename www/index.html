@@ -403,7 +403,7 @@ html.dark #login input{border:1px solid #3a3a3c;background:#2c2c2e;color:#f2f2f7
 
 <script>
 // 前端版本常量(方案B): 打包版自带版本号; 后台对比后端 /api/frontend/version, 有新版本则提示刷新加载同源最新页.
-window.__APP_VER_INIT__ = '2026-11-13_2';
+window.__APP_VER_INIT__ = '2026-11-13_3';
 // API 基站: 局域网优先(快速直达), 公网域名兜底; 自动探测+缓存上次可用, 保证又快又稳
 const IS_WEB=(/^https?:$/.test(location.protocol)&&!/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname));
 const API_CANDIDATES=IS_WEB?[location.origin]:['http://192.168.1.9:8090','https://soul0516.duckdns.org:46893'];
@@ -1344,8 +1344,8 @@ async function send(){
   const s=curSession(); if(s && s.summary) body._compressContext=s.summary;
   // 意图先算(前端规则): hasImage 表示本会话内有图可用(含上一张), 用于擦除/改图等规则识别
   let intentObj = ruleIntent(txt, !!(imgs.length||lastImageUrl||refImg));
-  let chatImgs = imgs.map(b=>({data:b,mime:'image/jpeg'}));
-  if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:'image/jpeg'}); }  // 引用的图片作为改图对象
+  let chatImgs = imgs.map(b=>({data:b,mime:imgMimeOf(b)}));
+  if(refImg){ chatImgs.unshift(/^https?:/.test(refImg)?{url:refImg}:{data:refImg,mime:imgMimeOf(refImg)}); }  // 引用的图片作为改图对象
   // 是否回带上上一张图: 仅当本次确实与图相关(改/擦/换/生成/图问答)才注入;
   // 纯文本问答/联网搜索(例: 生成一张图后再问"最新电影")不注入, 避免把普通问题拖成慢速视觉任务、模型误判去生图
   const imgRel = !!lastImageUrl && (
@@ -1522,7 +1522,9 @@ async function pollTask(j){
 
 function fileClick(){$('file').click()}
 $('file').addEventListener('change',e=>{const files=[...e.target.files];files.forEach(f=>{const rd=new FileReader();rd.onload=async()=>{const b64=await shrinkImage(rd.result,1536,0.9);pendingImages.push(b64);renderPreview()};rd.readAsDataURL(f)});e.target.value=''});
-async function shrinkImage(dataUrl,maxDim,q){return new Promise(res=>{const img=new Image();img.onload=()=>{let w=img.naturalWidth,h=img.naturalHeight;const m=Math.max(w,h);if(m>maxDim){const s=maxDim/m;w=w*s;h=h*s;}w=Math.max(64,Math.min(maxDim,Math.floor(w/64)*64));h=Math.max(64,Math.min(maxDim,Math.floor(h/64)*64));try{const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);res(cv.toDataURL('image/jpeg',q).split(',')[1]);}catch(err){res(dataUrl.split(',')[1]);}};img.onerror=()=>res(dataUrl.split(',')[1]);img.src=dataUrl;});}
+async function shrinkImage(dataUrl,maxDim,q){return new Promise(res=>{const img=new Image();img.onload=()=>{let w=img.naturalWidth,h=img.naturalHeight;const m=Math.max(w,h);if(m>maxDim){const s=maxDim/m;w=w*s;h=h*s;}w=Math.max(64,Math.min(maxDim,Math.floor(w/64)*64));h=Math.max(64,Math.min(maxDim,Math.floor(h/64)*64));try{const cv=document.createElement('canvas');cv.width=w;cv.height=h;const ctx=cv.getContext('2d');if(!ctx) throw new Error('no 2d');ctx.drawImage(img,0,0,w,h);const out=cv.toDataURL('image/jpeg',q);res(out&&out.indexOf(',')>=0?out.split(',')[1]:'');}catch(err){const b=(dataUrl||'').split(',')[1]||'';res(b);}};img.onerror=()=>res((dataUrl||'').split(',')[1]||'');img.src=dataUrl;});}
+// 依据 base64 头部推断图片真实 MIME(避免 shrinkImage canvas 失败回退原图(如 PNG/HEIC)时仍硬编码成 jpeg 导致模型解码失败)
+function imgMimeOf(b){const s=String(b||'');if(s.indexOf('iVBOR')===0)return 'image/png';if(s.indexOf('/9j/')===0)return 'image/jpeg';if(s.indexOf('UklGR')===0)return 'image/webp';if(s.indexOf('R0lG')===0)return 'image/gif';if(s.indexOf('Qk')===0||s.indexOf('Qk0')===0)return 'image/bmp';return 'image/jpeg';}
 function renderPreview(){const p=$('preview');p.innerHTML='';pendingImages.forEach((b,i)=>{const d=document.createElement('div');d.className='pthumb';d.innerHTML='<img src="data:image/jpeg;base64,'+b+'"><span class="del" onclick="delImg('+i+')">×</span>';p.appendChild(d)})}
 function delImg(i){pendingImages.splice(i,1);renderPreview()}
 
