@@ -551,7 +551,7 @@ async function checkFeUpdate(){
   try{
     const base = await pickApiBase().catch(()=>API);   // 确保用正确基站, 避免冷启动时API未就绪
     const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),8000);
-    const r=await fetch(base+'/api/frontend/version',{signal:ac.signal, headers:{'Accept':'application/json'}});
+    const r=await fetch(base+'/api/frontend/version',{signal:ac.signal, cache:'no-store', headers:{'Accept':'application/json'}});
     clearTimeout(to);
     const j=await r.json();
     if(!j || !j.ok || !j.version) return;
